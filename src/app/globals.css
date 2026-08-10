@@ -1,26 +1,141 @@
 @import "tailwindcss";
 
+@custom-variant dark (&:where(.dark, .dark *));
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --bg: oklch(1 0 0);
+  --surface: oklch(0.985 0.004 357);
+  --ink: oklch(0.22 0.02 357);
+  --muted: oklch(0.48 0.015 357);
+  --primary: oklch(0.48 0.17 357);
+  --primary-fg: oklch(0.99 0.005 357);
+  --accent: oklch(0.42 0.09 230);
+  --accent-fg: oklch(0.99 0 0);
+  --danger: oklch(0.5 0.18 25);
+  --danger-fg: oklch(0.99 0 0);
+  --border: oklch(0.9 0.01 357);
+  --ring: oklch(0.48 0.17 357);
+  --overlay: oklch(0.22 0.02 357 / 0.45);
+  --shadow: oklch(0.22 0.02 357 / 0.08);
+  --background: var(--bg);
+  --foreground: var(--ink);
+}
+
+.dark {
+  --bg: oklch(0.12 0 0);
+  --surface: oklch(0.18 0.01 357);
+  --ink: oklch(0.95 0.01 357);
+  --muted: oklch(0.68 0.01 357);
+  --primary: oklch(0.68 0.15 357);
+  --primary-fg: oklch(0.16 0.02 357);
+  --accent: oklch(0.72 0.08 230);
+  --accent-fg: oklch(0.16 0 0);
+  --danger: oklch(0.68 0.16 25);
+  --danger-fg: oklch(0.16 0 0);
+  --border: oklch(0.28 0.01 357);
+  --ring: oklch(0.68 0.15 357);
+  --overlay: oklch(0 0 0 / 0.55);
+  --shadow: oklch(0 0 0 / 0.35);
+  --background: var(--bg);
+  --foreground: var(--ink);
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-background: var(--bg);
+  --color-foreground: var(--ink);
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-primary: var(--primary);
+  --color-primary-fg: var(--primary-fg);
+  --color-accent: var(--accent);
+  --color-accent-fg: var(--accent-fg);
+  --color-danger: var(--danger);
+  --color-danger-fg: var(--danger-fg);
+  --color-border: var(--border);
+  --color-ring: var(--ring);
+  --font-sans: var(--font-dm-sans);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+@layer base {
+  * {
+    border-color: var(--border);
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    html {
+      scroll-behavior: auto;
+    }
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--font-dm-sans), system-ui, sans-serif;
+    font-feature-settings: "ss01" 1, "cv11" 1;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  h1,
+  h2,
+  h3 {
+    text-wrap: balance;
+    letter-spacing: -0.02em;
+  }
+
+  p {
+    text-wrap: pretty;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+@layer utilities {
+  .money {
+    font-variant-numeric: tabular-nums;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+  }
+
+  .text-owed {
+    color: var(--accent);
+  }
+
+  .text-owe {
+    color: var(--danger);
+  }
+
+  .panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 1rem;
+  }
+
+  .page-title {
+    font-size: 1.5rem;
+    font-weight: 700;
+    letter-spacing: -0.025em;
+    color: var(--ink);
+  }
+
+  @media (min-width: 640px) {
+    .page-title {
+      font-size: 1.875rem;
+    }
+  }
 }
