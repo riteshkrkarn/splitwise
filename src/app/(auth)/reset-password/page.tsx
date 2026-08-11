@@ -10,6 +10,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { PasswordInput } from "@/components/ui/password-input";
 import { Label } from "@/components/ui/label";
 import { Suspense } from "react";
 
@@ -35,7 +36,7 @@ function ResetInner() {
           <input type="hidden" name="token" value={token} />
           <div>
             <Label htmlFor="password">New password</Label>
-            <Input id="password" name="password" type="password" minLength={6} required />
+            <PasswordInput id="password" name="password" minLength={6} required />
           </div>
           {resetState.error && (
             <p className="text-sm text-danger">{resetState.error}</p>

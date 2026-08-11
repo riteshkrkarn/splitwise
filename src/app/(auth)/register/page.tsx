@@ -7,6 +7,7 @@ import { AvatarPicker } from "@/components/avatar-picker";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { PasswordInput } from "@/components/ui/password-input";
 import { Label } from "@/components/ui/label";
 
 const initial: ActionResult = {};
@@ -35,10 +36,9 @@ export default function RegisterPage() {
           </div>
           <div>
             <Label htmlFor="password">Password</Label>
-            <Input
+            <PasswordInput
               id="password"
               name="password"
-              type="password"
               minLength={6}
               autoComplete="new-password"
               required

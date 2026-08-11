@@ -1,43 +1,21 @@
-import { NextResponse } from "next/server";
-import type { NextRequest } from "next/server";
-import { getToken } from "next-auth/jwt";
+import NextAuth from "next-auth";
+import { authConfig } from "@/auth.config";
 
-const protectedPrefixes = [
-  "/dashboard",
-  "/groups",
-  "/friends",
-  "/profile",
-  "/activity",
-  "/analytics",
-];
-
-export async function middleware(req: NextRequest) {
-  const { pathname } = req.nextUrl;
-  const isProtected = protectedPrefixes.some(
-    (p) => pathname === p || pathname.startsWith(`${p}/`)
-  );
-  if (!isProtected) return NextResponse.next();
-
-  const token = await getToken({
-    req,
-    secret: process.env.AUTH_SECRET,
-  });
-  if (!token) {
-    const url = req.nextUrl.clone();
-    url.pathname = "/login";
-    url.searchParams.set("next", pathname);
-    return NextResponse.redirect(url);
-  }
-  return NextResponse.next();
-}
+export default NextAuth(authConfig).auth;
 
 export const config = {
   matcher: [
+    "/dashboard",
     "/dashboard/:path*",
+    "/groups",
     "/groups/:path*",
+    "/friends",
     "/friends/:path*",
+    "/profile",
     "/profile/:path*",
+    "/activity",
     "/activity/:path*",
+    "/analytics",
     "/analytics/:path*",
   ],
 };

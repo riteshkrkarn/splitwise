@@ -2,16 +2,20 @@
 
 import Link from "next/link";
 import { useActionState } from "react";
+import { useSearchParams } from "next/navigation";
+import { Suspense } from "react";
 import { loginAction, type ActionResult } from "@/actions/auth";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { PasswordInput } from "@/components/ui/password-input";
 import { Label } from "@/components/ui/label";
 
 const initial: ActionResult = {};
 
-export default function LoginPage() {
+function LoginForm() {
   const [state, action, pending] = useActionState(loginAction, initial);
+  const next = useSearchParams().get("next") ?? "/dashboard";
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-bg px-4">
@@ -22,16 +26,16 @@ export default function LoginPage() {
           Pick up where you left your group balances.
         </p>
         <form action={action} className="mt-6 space-y-4">
+          <input type="hidden" name="next" value={next} />
           <div>
             <Label htmlFor="email">Email</Label>
             <Input id="email" name="email" type="email" autoComplete="email" required />
           </div>
           <div>
             <Label htmlFor="password">Password</Label>
-            <Input
+            <PasswordInput
               id="password"
               name="password"
-              type="password"
               autoComplete="current-password"
               required
             />
@@ -57,5 +61,13 @@ export default function LoginPage() {
         </p>
       </Card>
     </div>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense>
+      <LoginForm />
+    </Suspense>
   );
 }

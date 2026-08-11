@@ -12,6 +12,40 @@ import { createId } from "@/lib/id";
 
 export type ActionResult = { error?: string; success?: string };
 
+function safeNextPath(raw: FormDataEntryValue | null) {
+  const next = String(raw ?? "/dashboard");
+  if (!next.startsWith("/") || next.startsWith("//")) return "/dashboard";
+  return next;
+}
+
+function credentialsFailed(error: unknown) {
+  if (error instanceof AuthError) return true;
+  const type = (error as { type?: string } | null)?.type;
+  return type === "CredentialsSignin" || type === "CallbackRouteError";
+}
+
+async function signInWithPassword(email: string, password: string) {
+  if (!process.env.AUTH_SECRET) {
+    return { error: "Server is missing AUTH_SECRET. Add it in Vercel and redeploy." };
+  }
+  try {
+    const result = await signIn("credentials", {
+      email,
+      password,
+      redirect: false,
+    });
+    if (result && typeof result === "object" && "error" in result && result.error) {
+      return { error: "Invalid email or password." };
+    }
+  } catch (error) {
+    if (credentialsFailed(error)) {
+      return { error: "Invalid email or password." };
+    }
+    throw error;
+  }
+  return null;
+}
+
 export async function registerAction(
   _prev: ActionResult,
   formData: FormData
@@ -42,13 +76,11 @@ export async function registerAction(
     })
     ;
 
-  try {
-    await signIn("credentials", { email, password, redirectTo: "/dashboard" });
-  } catch (e) {
-    if (e instanceof AuthError) return { error: "Registered but login failed." };
-    throw e;
+  const signInError = await signInWithPassword(email, password);
+  if (signInError) {
+    return { error: "Account created, but sign-in failed. Try logging in." };
   }
-  return {};
+  redirect("/dashboard");
 }
 
 export async function loginAction(
@@ -57,13 +89,9 @@ export async function loginAction(
 ): Promise<ActionResult> {
   const email = String(formData.get("email") ?? "").trim().toLowerCase();
   const password = String(formData.get("password") ?? "");
-  try {
-    await signIn("credentials", { email, password, redirectTo: "/dashboard" });
-  } catch (e) {
-    if (e instanceof AuthError) return { error: "Invalid email or password." };
-    throw e;
-  }
-  return {};
+  const signInError = await signInWithPassword(email, password);
+  if (signInError) return signInError;
+  redirect(safeNextPath(formData.get("next")));
 }
 
 export async function logoutAction() {
