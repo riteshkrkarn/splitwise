@@ -5,10 +5,7 @@ import { revalidatePath } from "next/cache";
 import { auth } from "@/auth";
 import type { ActionResult } from "@/actions/auth";
 import { db } from "@/db";
-import { migrate } from "@/db/ensure-migrated";
 import { users } from "@/db/schema";
-
-migrate();
 
 export async function updateProfileAction(
   _prev: ActionResult,
@@ -21,14 +18,14 @@ export async function updateProfileAction(
   const avatarId = Number(formData.get("avatarId") ?? 1);
   if (!name) return { error: "Name is required." };
 
-  db.update(users)
+  await db.update(users)
     .set({
       name,
       avatarId: Math.min(5, Math.max(1, avatarId || 1)),
       updatedAt: new Date(),
     })
     .where(eq(users.id, session.user.id))
-    .run();
+    ;
 
   revalidatePath("/profile");
   revalidatePath("/dashboard");

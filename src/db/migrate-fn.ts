@@ -1,4 +1,4 @@
-import { rawSqlite } from "./index";
+import { client } from "./index";
 
 const statements = [
   `CREATE TABLE IF NOT EXISTS users (
@@ -203,18 +203,21 @@ const statements = [
   `CREATE UNIQUE INDEX IF NOT EXISTS exchange_rates_unique ON exchange_rates(base, date)`,
 ];
 
-export function migrate() {
-  rawSqlite.exec("PRAGMA foreign_keys = ON;");
-  for (const statement of statements) {
-    rawSqlite.exec(statement);
+export async function migrate() {
+  try {
+    await client.execute("PRAGMA foreign_keys = ON;");
+  } catch {
+    // hosted Turso may ignore this pragma
   }
-  // Upgrade existing DBs safely
+  for (const statement of statements) {
+    await client.execute(statement);
+  }
   for (const alter of [
     `ALTER TABLE friendships ADD COLUMN status TEXT NOT NULL DEFAULT 'ACCEPTED'`,
     `ALTER TABLE friendships ADD COLUMN requested_by TEXT`,
   ]) {
     try {
-      rawSqlite.exec(alter);
+      await client.execute(alter);
     } catch {
       // column already exists
     }

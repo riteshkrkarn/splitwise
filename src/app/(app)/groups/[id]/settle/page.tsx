@@ -17,13 +17,13 @@ export default async function SettlePage({
   const session = await auth();
   if (!session?.user?.id) return null;
   try {
-    assertGroupMember(id, session.user.id);
+    await assertGroupMember(id, session.user.id);
   } catch {
     notFound();
   }
-  const group = getGroupOrThrow(id);
-  const members = getGroupMembers(id);
-  const balances = getGroupBalances(id);
+  const group = await getGroupOrThrow(id);
+  const members = await getGroupMembers(id);
+  const balances = await getGroupBalances(id);
   const summary =
     balances.find((b) => b.currency === group.currency) ?? balances[0];
   const suggestions = summary?.debts ?? [];

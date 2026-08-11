@@ -6,7 +6,6 @@ import { redirect } from "next/navigation";
 import { auth } from "@/auth";
 import type { ActionResult } from "@/actions/auth";
 import { db } from "@/db";
-import { migrate } from "@/db/ensure-migrated";
 import {
   expenseComments,
   expenseHistory,
@@ -27,8 +26,6 @@ import {
   type SplitMode,
 } from "@/lib/split-validator";
 
-migrate();
-
 function parseParticipants(formData: FormData) {
   const participantIds = formData.getAll("participantIds").map(String);
   return participantIds;
@@ -43,7 +40,7 @@ export async function createExpenseAction(
   const session = await auth();
   if (!session?.user?.id) return { error: "Unauthorized" };
 
-  if (groupId) assertGroupMember(groupId, session.user.id);
+  if (groupId) await assertGroupMember(groupId, session.user.id);
 
   const description = String(formData.get("description") ?? "").trim();
   const amount = Number(formData.get("amount"));
@@ -105,7 +102,7 @@ export async function createExpenseAction(
   }
 
   const expenseId = createId("exp");
-  db.insert(expenses)
+  await db.insert(expenses)
     .values({
       id: expenseId,
       groupId,
@@ -122,10 +119,10 @@ export async function createExpenseAction(
       createdAt: new Date(),
       updatedAt: new Date(),
     })
-    .run();
+    ;
 
   for (const s of splits) {
-    db.insert(expenseSplits)
+    await db.insert(expenseSplits)
       .values({
         id: createId("spl"),
         expenseId,
@@ -134,20 +131,20 @@ export async function createExpenseAction(
         shares: s.shares ?? null,
         percent: s.percent ?? null,
       })
-      .run();
+      ;
   }
   for (const p of payers) {
-    db.insert(expensePayers)
+    await db.insert(expensePayers)
       .values({
         id: createId("pay"),
         expenseId,
         userId: p.userId,
         amount: p.amount,
       })
-      .run();
+      ;
   }
 
-  db.insert(expenseHistory)
+  await db.insert(expenseHistory)
     .values({
       id: createId("hist"),
       expenseId,
@@ -156,9 +153,9 @@ export async function createExpenseAction(
       snapshot: JSON.stringify({ description, amount, currency, splits, payers }),
       createdAt: new Date(),
     })
-    .run();
+    ;
 
-  createActivity({
+  await createActivity({
     userId: session.user.id,
     groupId,
     type: "EXPENSE_CREATED",
@@ -166,10 +163,10 @@ export async function createExpenseAction(
   });
 
   if (groupId) {
-    const members = getGroupMembers(groupId);
+    const members = await getGroupMembers(groupId);
     for (const m of members) {
       if (m.userId === session.user.id) continue;
-      createNotification({
+      await createNotification({
         userId: m.userId,
         groupId,
         type: "EXPENSE_ADDED",
@@ -193,16 +190,16 @@ export async function createExpenseAction(
 export async function softDeleteExpenseAction(expenseId: string) {
   const session = await auth();
   if (!session?.user?.id) throw new Error("Unauthorized");
-  const expense = db.select().from(expenses).where(eq(expenses.id, expenseId)).get();
+  const expense = await db.select().from(expenses).where(eq(expenses.id, expenseId)).get();
   if (!expense) throw new Error("Not found");
-  if (expense.groupId) assertGroupMember(expense.groupId, session.user.id);
+  if (expense.groupId) await assertGroupMember(expense.groupId, session.user.id);
 
-  db.update(expenses)
+  await db.update(expenses)
     .set({ deletedAt: new Date(), updatedAt: new Date() })
     .where(eq(expenses.id, expenseId))
-    .run();
+    ;
 
-  db.insert(expenseHistory)
+  await db.insert(expenseHistory)
     .values({
       id: createId("hist"),
       expenseId,
@@ -211,10 +208,10 @@ export async function softDeleteExpenseAction(expenseId: string) {
       snapshot: JSON.stringify({ deletedAt: new Date() }),
       createdAt: new Date(),
     })
-    .run();
+    ;
 
   if (expense.groupId) {
-    createActivity({
+    await createActivity({
       userId: session.user.id,
       groupId: expense.groupId,
       type: "EXPENSE_DELETED",
@@ -228,16 +225,16 @@ export async function softDeleteExpenseAction(expenseId: string) {
 export async function restoreExpenseAction(expenseId: string) {
   const session = await auth();
   if (!session?.user?.id) throw new Error("Unauthorized");
-  const expense = db.select().from(expenses).where(eq(expenses.id, expenseId)).get();
+  const expense = await db.select().from(expenses).where(eq(expenses.id, expenseId)).get();
   if (!expense?.groupId) throw new Error("Not found");
-  assertGroupMember(expense.groupId, session.user.id);
+  await assertGroupMember(expense.groupId, session.user.id);
 
-  db.update(expenses)
+  await db.update(expenses)
     .set({ deletedAt: null, updatedAt: new Date() })
     .where(eq(expenses.id, expenseId))
-    .run();
+    ;
 
-  createActivity({
+  await createActivity({
     userId: session.user.id,
     groupId: expense.groupId,
     type: "EXPENSE_RESTORED",
@@ -257,11 +254,11 @@ export async function addCommentAction(
   const body = String(formData.get("body") ?? "").trim();
   if (!body) return { error: "Comment required" };
 
-  const expense = db.select().from(expenses).where(eq(expenses.id, expenseId)).get();
+  const expense = await db.select().from(expenses).where(eq(expenses.id, expenseId)).get();
   if (!expense) return { error: "Expense not found" };
-  if (expense.groupId) assertGroupMember(expense.groupId, session.user.id);
+  if (expense.groupId) await assertGroupMember(expense.groupId, session.user.id);
 
-  db.insert(expenseComments)
+  await db.insert(expenseComments)
     .values({
       id: createId("cmt"),
       expenseId,
@@ -269,17 +266,17 @@ export async function addCommentAction(
       body,
       createdAt: new Date(),
     })
-    .run();
+    ;
 
   if (expense.groupId) {
-    createActivity({
+    await createActivity({
       userId: session.user.id,
       groupId: expense.groupId,
       type: "COMMENT",
       message: `${session.user.name} commented on “${expense.description}”`,
     });
     if (expense.createdById !== session.user.id) {
-      createNotification({
+      await createNotification({
         userId: expense.createdById,
         groupId: expense.groupId,
         type: "COMMENT",

@@ -9,7 +9,6 @@ import { Button } from "@/components/ui/button";
 import { Card, EmptyState } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { db } from "@/db";
-import { migrate } from "@/db/ensure-migrated";
 import { expenses } from "@/db/schema";
 import {
   assertGroupMember,
@@ -21,8 +20,6 @@ import {
 } from "@/lib/group-data";
 import { formatMoney } from "@/lib/utils";
 import { InviteForm } from "./group-forms";
-
-migrate();
 
 export default async function GroupPage({
   params,
@@ -37,29 +34,29 @@ export default async function GroupPage({
   if (!session?.user?.id) return null;
 
   try {
-    assertGroupMember(id, session.user.id);
+    await assertGroupMember(id, session.user.id);
   } catch {
     notFound();
   }
 
-  const group = getGroupOrThrow(id);
-  const members = getGroupMembers(id);
+  const group = await getGroupOrThrow(id);
+  const members = await getGroupMembers(id);
   const nameById = Object.fromEntries(members.map((m) => [m.userId, m.name]));
-  const balances = getGroupBalances(id);
-  const invites = getPendingInvites(id);
+  const balances = await getGroupBalances(id);
+  const invites = await getPendingInvites(id);
 
   const conditions = [eq(expenses.groupId, id)];
   if (sp.q) conditions.push(like(expenses.description, `%${sp.q}%`));
   if (sp.category) conditions.push(eq(expenses.category, sp.category));
 
-  const active = db
+  const active = await db
     .select()
     .from(expenses)
     .where(and(...conditions, isNull(expenses.deletedAt)))
     .orderBy(desc(expenses.date))
     .all();
 
-  const deleted = db
+  const deleted = await db
     .select()
     .from(expenses)
     .where(and(eq(expenses.groupId, id), isNotNull(expenses.deletedAt)))
@@ -67,7 +64,7 @@ export default async function GroupPage({
     .limit(10)
     .all();
 
-  const { settlements } = getGroupExpenseBundle(id);
+  const { settlements } = await getGroupExpenseBundle(id);
 
   return (
     <div className="space-y-6">

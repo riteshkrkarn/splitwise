@@ -2,19 +2,16 @@ import { and, eq, isNull, or } from "drizzle-orm";
 import { auth } from "@/auth";
 import FriendsClient from "./friends-client";
 import { db } from "@/db";
-import { migrate } from "@/db/ensure-migrated";
 import { friendships, users } from "@/db/schema";
 import { NotificationActions } from "@/components/notification-actions";
 import { Card } from "@/components/ui/card";
-
-migrate();
 
 export default async function FriendsPage() {
   const session = await auth();
   if (!session?.user?.id) return null;
   const userId = session.user.id;
 
-  const accepted = db
+  const accepted = await db
     .select()
     .from(friendships)
     .where(
@@ -26,39 +23,52 @@ export default async function FriendsPage() {
     )
     .all();
 
-  const pendingIncoming = db
-    .select()
-    .from(friendships)
-    .where(
-      and(
-        isNull(friendships.deletedAt),
-        eq(friendships.status, "PENDING"),
-        or(eq(friendships.userAId, userId), eq(friendships.userBId, userId))
+  const pendingIncoming = (
+    await db
+      .select()
+      .from(friendships)
+      .where(
+        and(
+          isNull(friendships.deletedAt),
+          eq(friendships.status, "PENDING"),
+          or(eq(friendships.userAId, userId), eq(friendships.userBId, userId))
+        )
       )
-    )
-    .all()
-    .filter((f) => f.requestedBy !== userId);
+      .all()
+  ).filter((f) => f.requestedBy !== userId);
 
-  const friends = accepted.map((f) => {
-    const otherId = f.userAId === userId ? f.userBId : f.userAId;
-    const other = db.select().from(users).where(eq(users.id, otherId)).get()!;
-    return {
-      id: f.id,
-      name: other.name,
-      email: other.email,
-      avatarId: other.avatarId,
-    };
-  });
+  const friends = await Promise.all(
+    accepted.map(async (f) => {
+      const otherId = f.userAId === userId ? f.userBId : f.userAId;
+      const other = (await db
+        .select()
+        .from(users)
+        .where(eq(users.id, otherId))
+        .get())!;
+      return {
+        id: f.id,
+        name: other.name,
+        email: other.email,
+        avatarId: other.avatarId,
+      };
+    })
+  );
 
-  const requests = pendingIncoming.map((f) => {
-    const otherId = f.userAId === userId ? f.userBId : f.userAId;
-    const other = db.select().from(users).where(eq(users.id, otherId)).get()!;
-    return {
-      id: f.id,
-      name: other.name,
-      email: other.email,
-    };
-  });
+  const requests = await Promise.all(
+    pendingIncoming.map(async (f) => {
+      const otherId = f.userAId === userId ? f.userBId : f.userAId;
+      const other = (await db
+        .select()
+        .from(users)
+        .where(eq(users.id, otherId))
+        .get())!;
+      return {
+        id: f.id,
+        name: other.name,
+        email: other.email,
+      };
+    })
+  );
 
   return (
     <div className="space-y-6">

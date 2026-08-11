@@ -5,7 +5,6 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { auth } from "@/auth";
 import { db } from "@/db";
-import { migrate } from "@/db/ensure-migrated";
 import {
   defaultSplits,
   groupInvites,
@@ -24,8 +23,6 @@ import {
 import { createId } from "@/lib/id";
 import { MAX_GROUP_MEMBERS } from "@/lib/utils";
 
-migrate();
-
 export async function createGroupAction(
   _prev: ActionResult,
   formData: FormData
@@ -39,7 +36,7 @@ export async function createGroupAction(
   if (!name) return { error: "Group name is required." };
 
   const id = createId("grp");
-  db.insert(groups)
+  await db.insert(groups)
     .values({
       id,
       name,
@@ -50,18 +47,18 @@ export async function createGroupAction(
       createdAt: new Date(),
       updatedAt: new Date(),
     })
-    .run();
+    ;
 
-  db.insert(groupMembers)
+  await db.insert(groupMembers)
     .values({
       id: createId("gmem"),
       groupId: id,
       userId: session.user.id,
       joinedAt: new Date(),
     })
-    .run();
+    ;
 
-  createActivity({
+  await createActivity({
     userId: session.user.id,
     groupId: id,
     type: "GROUP_CREATED",
@@ -78,12 +75,12 @@ export async function inviteToGroupAction(
 ): Promise<ActionResult> {
   const session = await auth();
   if (!session?.user?.id) return { error: "Unauthorized" };
-  assertGroupMember(groupId, session.user.id);
+  await assertGroupMember(groupId, session.user.id);
 
   const email = String(formData.get("email") ?? "").trim().toLowerCase();
   if (!email) return { error: "Email is required." };
 
-  const invitee = db.select().from(users).where(eq(users.email, email)).get();
+  const invitee = await db.select().from(users).where(eq(users.email, email)).get();
   if (!invitee) {
     return { error: "No registered user with that email. They need an account first." };
   }
@@ -92,26 +89,30 @@ export async function inviteToGroupAction(
   }
 
   const memberCount =
-    db
-      .select({ value: count() })
-      .from(groupMembers)
-      .where(eq(groupMembers.groupId, groupId))
-      .get()?.value ?? 0;
+    (
+      await db
+        .select({ value: count() })
+        .from(groupMembers)
+        .where(eq(groupMembers.groupId, groupId))
+        .get()
+    )?.value ?? 0;
 
   const pendingCount =
-    db
-      .select({ value: count() })
-      .from(groupInvites)
-      .where(
-        and(eq(groupInvites.groupId, groupId), eq(groupInvites.status, "PENDING"))
-      )
-      .get()?.value ?? 0;
+    (
+      await db
+        .select({ value: count() })
+        .from(groupInvites)
+        .where(
+          and(eq(groupInvites.groupId, groupId), eq(groupInvites.status, "PENDING"))
+        )
+        .get()
+    )?.value ?? 0;
 
   if (memberCount + pendingCount >= MAX_GROUP_MEMBERS) {
     return { error: `Group is limited to ${MAX_GROUP_MEMBERS} people.` };
   }
 
-  const existingMember = db
+  const existingMember = await db
     .select()
     .from(groupMembers)
     .where(
@@ -120,7 +121,7 @@ export async function inviteToGroupAction(
     .get();
   if (existingMember) return { error: "User is already a member." };
 
-  const existingPending = db
+  const existingPending = await db
     .select()
     .from(groupInvites)
     .where(
@@ -133,10 +134,10 @@ export async function inviteToGroupAction(
     .get();
   if (existingPending) return { error: "An invite is already pending for this user." };
 
-  const group = getGroupOrThrow(groupId);
+  const group = await getGroupOrThrow(groupId);
   const inviteId = createId("ginv");
   const token = createId("inv");
-  db.insert(groupInvites)
+  await db.insert(groupInvites)
     .values({
       id: inviteId,
       groupId,
@@ -146,9 +147,9 @@ export async function inviteToGroupAction(
       invitedBy: session.user.id,
       createdAt: new Date(),
     })
-    .run();
+    ;
 
-  createNotification({
+  await createNotification({
     userId: invitee.id,
     groupId,
     type: "INVITE",
@@ -166,7 +167,7 @@ export async function acceptInviteAction(inviteId: string) {
   const session = await auth();
   if (!session?.user?.id) throw new Error("Unauthorized");
 
-  const invite = db
+  const invite = await db
     .select()
     .from(groupInvites)
     .where(eq(groupInvites.id, inviteId))
@@ -179,16 +180,18 @@ export async function acceptInviteAction(inviteId: string) {
   }
 
   const memberCount =
-    db
-      .select({ value: count() })
-      .from(groupMembers)
-      .where(eq(groupMembers.groupId, invite.groupId))
-      .get()?.value ?? 0;
+    (
+      await db
+        .select({ value: count() })
+        .from(groupMembers)
+        .where(eq(groupMembers.groupId, invite.groupId))
+        .get()
+    )?.value ?? 0;
   if (memberCount >= MAX_GROUP_MEMBERS) {
     throw new Error("Group is full (max 5).");
   }
 
-  const already = db
+  const already = await db
     .select()
     .from(groupMembers)
     .where(
@@ -199,30 +202,30 @@ export async function acceptInviteAction(inviteId: string) {
     )
     .get();
   if (!already) {
-    db.insert(groupMembers)
+    await db.insert(groupMembers)
       .values({
         id: createId("gmem"),
         groupId: invite.groupId,
         userId: session.user.id,
         joinedAt: new Date(),
       })
-      .run();
+      ;
   }
 
-  db.update(groupInvites)
+  await db.update(groupInvites)
     .set({ status: "ACCEPTED" })
     .where(eq(groupInvites.id, invite.id))
-    .run();
+    ;
 
-  const group = getGroupOrThrow(invite.groupId);
+  const group = await getGroupOrThrow(invite.groupId);
 
-  createActivity({
+  await createActivity({
     userId: session.user.id,
     groupId: invite.groupId,
     type: "MEMBER_JOINED",
     message: `${session.user.name} joined the group`,
   });
-  createNotification({
+  await createNotification({
     userId: invite.invitedBy,
     groupId: invite.groupId,
     type: "INVITE_ACCEPTED",
@@ -240,7 +243,7 @@ export async function rejectInviteAction(inviteId: string) {
   const session = await auth();
   if (!session?.user?.id) throw new Error("Unauthorized");
 
-  const invite = db
+  const invite = await db
     .select()
     .from(groupInvites)
     .where(eq(groupInvites.id, inviteId))
@@ -252,14 +255,14 @@ export async function rejectInviteAction(inviteId: string) {
     throw new Error("This invite was sent to a different account.");
   }
 
-  db.update(groupInvites)
+  await db.update(groupInvites)
     .set({ status: "DECLINED" })
     .where(eq(groupInvites.id, invite.id))
-    .run();
+    ;
 
-  const group = db.select().from(groups).where(eq(groups.id, invite.groupId)).get();
+  const group = await db.select().from(groups).where(eq(groups.id, invite.groupId)).get();
 
-  createNotification({
+  await createNotification({
     userId: invite.invitedBy,
     groupId: invite.groupId,
     type: "INVITE",
@@ -279,7 +282,7 @@ export async function updateGroupSettingsAction(
 ): Promise<ActionResult> {
   const session = await auth();
   if (!session?.user?.id) return { error: "Unauthorized" };
-  assertGroupMember(groupId, session.user.id);
+  await assertGroupMember(groupId, session.user.id);
 
   const name = String(formData.get("name") ?? "").trim();
   const coverAvatarId = Number(formData.get("coverAvatarId") ?? 1);
@@ -287,9 +290,9 @@ export async function updateGroupSettingsAction(
   const simplifyDebts = formData.get("simplifyDebts") === "on";
   const defaultSplitMode = String(formData.get("defaultSplitMode") ?? "EQUAL");
 
-  db.update(groups)
+  await db.update(groups)
     .set({
-      name: name || getGroupOrThrow(groupId).name,
+      name: name || (await getGroupOrThrow(groupId)).name,
       coverAvatarId: Math.min(5, Math.max(1, coverAvatarId || 1)),
       currency,
       simplifyDebts,
@@ -297,22 +300,22 @@ export async function updateGroupSettingsAction(
       updatedAt: new Date(),
     })
     .where(eq(groups.id, groupId))
-    .run();
+    ;
 
   // Optional default split values: value_<userId>
-  const members = getGroupMembers(groupId);
-  db.delete(defaultSplits).where(eq(defaultSplits.groupId, groupId)).run();
+  const members = await getGroupMembers(groupId);
+  await db.delete(defaultSplits).where(eq(defaultSplits.groupId, groupId));
   for (const m of members) {
     const raw = formData.get(`split_${m.userId}`);
     if (raw == null || raw === "") continue;
-    db.insert(defaultSplits)
+    await db.insert(defaultSplits)
       .values({
         id: createId("ds"),
         groupId,
         userId: m.userId,
         value: Number(raw),
       })
-      .run();
+      ;
   }
 
   revalidatePath(`/groups/${groupId}`);
@@ -322,18 +325,18 @@ export async function updateGroupSettingsAction(
 export async function leaveGroupAction(groupId: string) {
   const session = await auth();
   if (!session?.user?.id) throw new Error("Unauthorized");
-  assertGroupMember(groupId, session.user.id);
+  await assertGroupMember(groupId, session.user.id);
 
-  db.delete(groupMembers)
+  await db.delete(groupMembers)
     .where(
       and(
         eq(groupMembers.groupId, groupId),
         eq(groupMembers.userId, session.user.id)
       )
     )
-    .run();
+    ;
 
-  createActivity({
+  await createActivity({
     userId: session.user.id,
     groupId,
     type: "MEMBER_LEFT",
@@ -346,14 +349,14 @@ export async function leaveGroupAction(groupId: string) {
 export async function removeMemberAction(groupId: string, userId: string) {
   const session = await auth();
   if (!session?.user?.id) throw new Error("Unauthorized");
-  assertGroupMember(groupId, session.user.id);
+  await assertGroupMember(groupId, session.user.id);
   if (userId === session.user.id) throw new Error("Use leave group instead");
 
-  db.delete(groupMembers)
+  await db.delete(groupMembers)
     .where(
       and(eq(groupMembers.groupId, groupId), eq(groupMembers.userId, userId))
     )
-    .run();
+    ;
 
   revalidatePath(`/groups/${groupId}/settings`);
 }
@@ -361,23 +364,23 @@ export async function removeMemberAction(groupId: string, userId: string) {
 export async function softDeleteGroupAction(groupId: string) {
   const session = await auth();
   if (!session?.user?.id) throw new Error("Unauthorized");
-  assertGroupMember(groupId, session.user.id);
-  db.update(groups)
+  await assertGroupMember(groupId, session.user.id);
+  await db.update(groups)
     .set({ deletedAt: new Date(), updatedAt: new Date() })
     .where(eq(groups.id, groupId))
-    .run();
+    ;
   redirect("/dashboard");
 }
 
 export async function restoreGroupAction(groupId: string) {
   const session = await auth();
   if (!session?.user?.id) throw new Error("Unauthorized");
-  db.update(groups)
+  await db.update(groups)
     .set({ deletedAt: null, updatedAt: new Date() })
     .where(eq(groups.id, groupId))
-    .run();
+    ;
   // re-add membership if missing
-  const member = db
+  const member = await db
     .select()
     .from(groupMembers)
     .where(
@@ -385,14 +388,14 @@ export async function restoreGroupAction(groupId: string) {
     )
     .get();
   if (!member) {
-    db.insert(groupMembers)
+    await db.insert(groupMembers)
       .values({
         id: createId("gmem"),
         groupId,
         userId: session.user.id,
         joinedAt: new Date(),
       })
-      .run();
+      ;
   }
   redirect(`/groups/${groupId}`);
 }

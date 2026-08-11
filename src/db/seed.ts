@@ -13,12 +13,11 @@ import {
 import { createId } from "@/lib/id";
 import { computeSplits } from "@/lib/split-validator";
 
-migrate();
-
 async function seed() {
+  await migrate();
   const passwordHash = await bcrypt.hash("password123", 10);
 
-  const existing = db
+  const existing = await db
     .select()
     .from(users)
     .where(eq(users.email, "rahul@demo.com"))
@@ -31,7 +30,7 @@ async function seed() {
   const rahulId = createId("usr");
   const priyaId = createId("usr");
 
-  db.insert(users)
+  await db.insert(users)
     .values([
       {
         id: rahulId,
@@ -52,10 +51,10 @@ async function seed() {
         updatedAt: new Date(),
       },
     ])
-    .run();
+    ;
 
   const groupId = createId("grp");
-  db.insert(groups)
+  await db.insert(groups)
     .values({
       id: groupId,
       name: "Apartment",
@@ -66,9 +65,9 @@ async function seed() {
       createdAt: new Date(),
       updatedAt: new Date(),
     })
-    .run();
+    ;
 
-  db.insert(groupMembers)
+  await db.insert(groupMembers)
     .values([
       {
         id: createId("gmem"),
@@ -83,7 +82,7 @@ async function seed() {
         joinedAt: new Date(),
       },
     ])
-    .run();
+    ;
 
   const amount = 1200;
   const splits = computeSplits(amount, "EQUAL", [
@@ -91,7 +90,7 @@ async function seed() {
     { userId: priyaId },
   ]);
   const expenseId = createId("exp");
-  db.insert(expenses)
+  await db.insert(expenses)
     .values({
       id: expenseId,
       groupId,
@@ -105,26 +104,26 @@ async function seed() {
       createdAt: new Date(),
       updatedAt: new Date(),
     })
-    .run();
+    ;
 
   for (const s of splits) {
-    db.insert(expenseSplits)
+    await db.insert(expenseSplits)
       .values({
         id: createId("spl"),
         expenseId,
         userId: s.userId,
         amount: s.amount,
       })
-      .run();
+      ;
   }
-  db.insert(expensePayers)
+  await db.insert(expensePayers)
     .values({
       id: createId("pay"),
       expenseId,
       userId: rahulId,
       amount,
     })
-    .run();
+    ;
 
   console.log("Seeded demo users:");
   console.log("  rahul@demo.com / password123");

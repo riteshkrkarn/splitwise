@@ -10,14 +10,13 @@ import { migrate } from "@/db/ensure-migrated";
 import { passwordResetTokens, users } from "@/db/schema";
 import { createId } from "@/lib/id";
 
-migrate();
-
 export type ActionResult = { error?: string; success?: string };
 
 export async function registerAction(
   _prev: ActionResult,
   formData: FormData
 ): Promise<ActionResult> {
+  await migrate();
   const name = String(formData.get("name") ?? "").trim();
   const email = String(formData.get("email") ?? "").trim().toLowerCase();
   const password = String(formData.get("password") ?? "");
@@ -27,11 +26,11 @@ export async function registerAction(
     return { error: "Name, email, and password (6+ chars) are required." };
   }
 
-  const existing = db.select().from(users).where(eq(users.email, email)).get();
+  const existing = await db.select().from(users).where(eq(users.email, email)).get();
   if (existing) return { error: "Email already registered." };
 
   const passwordHash = await bcrypt.hash(password, 10);
-  db.insert(users)
+  await db.insert(users)
     .values({
       id: createId("usr"),
       email,
@@ -41,7 +40,7 @@ export async function registerAction(
       createdAt: new Date(),
       updatedAt: new Date(),
     })
-    .run();
+    ;
 
   try {
     await signIn("credentials", { email, password, redirectTo: "/dashboard" });
@@ -75,14 +74,15 @@ export async function requestPasswordResetAction(
   _prev: ActionResult,
   formData: FormData
 ): Promise<ActionResult> {
+  await migrate();
   const email = String(formData.get("email") ?? "").trim().toLowerCase();
-  const user = db.select().from(users).where(eq(users.email, email)).get();
+  const user = await db.select().from(users).where(eq(users.email, email)).get();
   if (!user) {
     return { success: "If that email exists, a reset link was created." };
   }
 
   const token = createId("rst");
-  db.insert(passwordResetTokens)
+  await db.insert(passwordResetTokens)
     .values({
       id: createId("prt"),
       token,
@@ -90,7 +90,7 @@ export async function requestPasswordResetAction(
       expiresAt: new Date(Date.now() + 1000 * 60 * 60),
       createdAt: new Date(),
     })
-    .run();
+    ;
 
   const link = `${process.env.APP_URL ?? "http://localhost:3000"}/reset-password?token=${token}`;
   console.log("[password-reset]", link);
@@ -103,13 +103,14 @@ export async function resetPasswordAction(
   _prev: ActionResult,
   formData: FormData
 ): Promise<ActionResult> {
+  await migrate();
   const token = String(formData.get("token") ?? "");
   const password = String(formData.get("password") ?? "");
   if (!token || password.length < 6) {
     return { error: "Valid token and password (6+ chars) required." };
   }
 
-  const row = db
+  const row = await db
     .select()
     .from(passwordResetTokens)
     .where(eq(passwordResetTokens.token, token))
@@ -119,10 +120,10 @@ export async function resetPasswordAction(
   }
 
   const passwordHash = await bcrypt.hash(password, 10);
-  db.update(users)
+  await db.update(users)
     .set({ passwordHash, updatedAt: new Date() })
     .where(eq(users.id, row.userId))
-    .run();
-  db.delete(passwordResetTokens).where(eq(passwordResetTokens.token, token)).run();
+    ;
+  await db.delete(passwordResetTokens).where(eq(passwordResetTokens.token, token));
   redirect("/login");
 }

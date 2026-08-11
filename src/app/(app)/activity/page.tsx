@@ -2,16 +2,13 @@ import { and, desc, eq, inArray, isNull, or } from "drizzle-orm";
 import { auth } from "@/auth";
 import { Card, EmptyState, PageHeader } from "@/components/ui/card";
 import { db } from "@/db";
-import { migrate } from "@/db/ensure-migrated";
 import { activityEvents, groupMembers, groups } from "@/db/schema";
-
-migrate();
 
 export default async function ActivityPage() {
   const session = await auth();
   if (!session?.user?.id) return null;
 
-  const memberships = db
+  const memberships = await db
     .select({ groupId: groupMembers.groupId })
     .from(groupMembers)
     .innerJoin(groups, eq(groups.id, groupMembers.groupId))
@@ -24,7 +21,7 @@ export default async function ActivityPage() {
   const events =
     groupIds.length === 0
       ? []
-      : db
+      : await db
           .select()
           .from(activityEvents)
           .where(

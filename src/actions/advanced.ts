@@ -5,14 +5,11 @@ import { revalidatePath } from "next/cache";
 import { auth } from "@/auth";
 import type { ActionResult } from "@/actions/auth";
 import { db } from "@/db";
-import { migrate } from "@/db/ensure-migrated";
 import { expenses, receiptItems, receipts } from "@/db/schema";
 import { assertGroupMember, getGroupExpenseBundle, getGroupMembers } from "@/lib/group-data";
 import { createId } from "@/lib/id";
 import fs from "fs";
 import path from "path";
-
-migrate();
 
 export async function attachReceiptAction(
   expenseId: string,
@@ -21,9 +18,9 @@ export async function attachReceiptAction(
   const session = await auth();
   if (!session?.user?.id) return { error: "Unauthorized" };
 
-  const expense = db.select().from(expenses).where(eq(expenses.id, expenseId)).get();
+  const expense = await db.select().from(expenses).where(eq(expenses.id, expenseId)).get();
   if (!expense?.groupId) return { error: "Expense not found" };
-  assertGroupMember(expense.groupId, session.user.id);
+  await assertGroupMember(expense.groupId, session.user.id);
 
   const file = formData.get("receipt") as File | null;
   const merchant = String(formData.get("merchant") ?? "") || null;
@@ -46,17 +43,17 @@ export async function attachReceiptAction(
   const scannedTotal = match ? Number(match[1]) : expense.amount;
 
   const receiptId = createId("rcp");
-  const existing = db
+  const existing = await db
     .select()
     .from(receipts)
     .where(eq(receipts.expenseId, expenseId))
     .get();
   if (existing) {
-    db.delete(receiptItems).where(eq(receiptItems.receiptId, existing.id)).run();
-    db.delete(receipts).where(eq(receipts.id, existing.id)).run();
+    await db.delete(receiptItems).where(eq(receiptItems.receiptId, existing.id));
+    await db.delete(receipts).where(eq(receipts.id, existing.id));
   }
 
-  db.insert(receipts)
+  await db.insert(receipts)
     .values({
       id: receiptId,
       expenseId,
@@ -66,7 +63,7 @@ export async function attachReceiptAction(
       scannedAt: new Date(),
       rawText,
     })
-    .run();
+    ;
 
   try {
     const items = JSON.parse(itemsJson) as Array<{
@@ -77,7 +74,7 @@ export async function attachReceiptAction(
     }>;
     for (const item of items) {
       if (!item.name || !(item.price > 0)) continue;
-      db.insert(receiptItems)
+      await db.insert(receiptItems)
         .values({
           id: createId("rit"),
           receiptId,
@@ -86,7 +83,7 @@ export async function attachReceiptAction(
           quantity: item.quantity ?? 1,
           assignedToUserId: item.assignedToUserId || null,
         })
-        .run();
+        ;
     }
   } catch {
     /* ignore bad json */
@@ -99,8 +96,8 @@ export async function attachReceiptAction(
 export async function getGroupExportData(groupId: string) {
   const session = await auth();
   if (!session?.user?.id) throw new Error("Unauthorized");
-  assertGroupMember(groupId, session.user.id);
-  const members = getGroupMembers(groupId);
-  const bundle = getGroupExpenseBundle(groupId);
+  await assertGroupMember(groupId, session.user.id);
+  const members = await getGroupMembers(groupId);
+  const bundle = await getGroupExpenseBundle(groupId);
   return { members, ...bundle };
 }

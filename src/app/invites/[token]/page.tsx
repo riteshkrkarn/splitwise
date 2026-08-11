@@ -8,10 +8,7 @@ import { auth } from "@/auth";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { db } from "@/db";
-import { migrate } from "@/db/ensure-migrated";
 import { groupInvites, groups } from "@/db/schema";
-
-migrate();
 
 export default async function InvitePage({
   params,
@@ -20,13 +17,13 @@ export default async function InvitePage({
 }) {
   const { token } = await params;
   const session = await auth();
-  const invite = db
+  const invite = await db
     .select()
     .from(groupInvites)
     .where(eq(groupInvites.token, token))
     .get();
   const group = invite
-    ? db.select().from(groups).where(eq(groups.id, invite.groupId)).get()
+    ? await db.select().from(groups).where(eq(groups.id, invite.groupId)).get()
     : null;
 
   if (!invite || !group) {

@@ -5,7 +5,6 @@ import { redirect } from "next/navigation";
 import { auth } from "@/auth";
 import type { ActionResult } from "@/actions/auth";
 import { db } from "@/db";
-import { migrate } from "@/db/ensure-migrated";
 import { settlements } from "@/db/schema";
 import {
   assertGroupMember,
@@ -14,8 +13,6 @@ import {
 } from "@/lib/group-data";
 import { createId } from "@/lib/id";
 
-migrate();
-
 export async function createSettlementAction(
   groupId: string,
   _prev: ActionResult,
@@ -23,7 +20,7 @@ export async function createSettlementAction(
 ): Promise<ActionResult> {
   const session = await auth();
   if (!session?.user?.id) return { error: "Unauthorized" };
-  assertGroupMember(groupId, session.user.id);
+  await assertGroupMember(groupId, session.user.id);
 
   const fromUserId = String(formData.get("fromUserId") ?? "");
   const toUserId = String(formData.get("toUserId") ?? "");
@@ -37,7 +34,7 @@ export async function createSettlementAction(
     return { error: "Pick two different people and a positive amount." };
   }
 
-  db.insert(settlements)
+  await db.insert(settlements)
     .values({
       id: createId("set"),
       groupId,
@@ -49,16 +46,16 @@ export async function createSettlementAction(
       note,
       createdAt: new Date(),
     })
-    .run();
+    ;
 
-  createActivity({
+  await createActivity({
     userId: session.user.id,
     groupId,
     type: "SETTLEMENT",
     message: `Settlement recorded`,
   });
 
-  createNotification({
+  await createNotification({
     userId: toUserId,
     groupId,
     type: "SETTLEMENT",

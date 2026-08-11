@@ -21,21 +21,25 @@ import {
 } from "@/lib/balances";
 import { createId } from "@/lib/id";
 
-migrate();
-
 export async function requireUserId(userId: string | undefined) {
   if (!userId) throw new Error("Unauthorized");
   return userId;
 }
 
-export function getGroupOrThrow(groupId: string) {
-  const group = db.select().from(groups).where(eq(groups.id, groupId)).get();
+export async function getGroupOrThrow(groupId: string) {
+  await migrate();
+  const group = await db
+    .select()
+    .from(groups)
+    .where(eq(groups.id, groupId))
+    .get();
   if (!group || group.deletedAt) throw new Error("Group not found");
   return group;
 }
 
-export function assertGroupMember(groupId: string, userId: string) {
-  const member = db
+export async function assertGroupMember(groupId: string, userId: string) {
+  await migrate();
+  const member = await db
     .select()
     .from(groupMembers)
     .where(
@@ -46,7 +50,8 @@ export function assertGroupMember(groupId: string, userId: string) {
   return member;
 }
 
-export function getGroupMembers(groupId: string) {
+export async function getGroupMembers(groupId: string) {
+  await migrate();
   return db
     .select({
       id: groupMembers.id,
@@ -62,8 +67,9 @@ export function getGroupMembers(groupId: string) {
     .all();
 }
 
-export function getGroupExpenseBundle(groupId: string) {
-  const activeExpenses = db
+export async function getGroupExpenseBundle(groupId: string) {
+  await migrate();
+  const activeExpenses = await db
     .select()
     .from(expenses)
     .where(and(eq(expenses.groupId, groupId), isNull(expenses.deletedAt)))
@@ -73,13 +79,17 @@ export function getGroupExpenseBundle(groupId: string) {
   const allSplits =
     expenseIds.length === 0
       ? []
-      : db.select().from(expenseSplits).all().filter((s) => expenseIds.includes(s.expenseId));
+      : (await db.select().from(expenseSplits).all()).filter((s) =>
+          expenseIds.includes(s.expenseId)
+        );
   const allPayers =
     expenseIds.length === 0
       ? []
-      : db.select().from(expensePayers).all().filter((p) => expenseIds.includes(p.expenseId));
+      : (await db.select().from(expensePayers).all()).filter((p) =>
+          expenseIds.includes(p.expenseId)
+        );
 
-  const activeSettlements = db
+  const activeSettlements = await db
     .select()
     .from(settlements)
     .where(and(eq(settlements.groupId, groupId), isNull(settlements.deletedAt)))
@@ -110,9 +120,9 @@ export function getGroupExpenseBundle(groupId: string) {
   };
 }
 
-export function getGroupBalances(groupId: string): BalanceSummary[] {
-  const group = getGroupOrThrow(groupId);
-  const { expensePayload, settlements } = getGroupExpenseBundle(groupId);
+export async function getGroupBalances(groupId: string): Promise<BalanceSummary[]> {
+  const group = await getGroupOrThrow(groupId);
+  const { expensePayload, settlements } = await getGroupExpenseBundle(groupId);
   const net = computeNetBalances(
     expensePayload,
     settlements.map((s) => ({
@@ -126,7 +136,7 @@ export function getGroupBalances(groupId: string): BalanceSummary[] {
   return summarizeBalances(net, group.simplifyDebts);
 }
 
-export function createNotification(input: {
+export async function createNotification(input: {
   userId: string;
   groupId?: string | null;
   type: string;
@@ -134,42 +144,41 @@ export function createNotification(input: {
   body: string;
   href?: string;
 }) {
-  db.insert(notifications)
-    .values({
-      id: createId("ntf"),
-      userId: input.userId,
-      groupId: input.groupId ?? null,
-      type: input.type,
-      title: input.title,
-      body: input.body,
-      href: input.href ?? null,
-      read: false,
-      createdAt: new Date(),
-    })
-    .run();
+  await migrate();
+  await db.insert(notifications).values({
+    id: createId("ntf"),
+    userId: input.userId,
+    groupId: input.groupId ?? null,
+    type: input.type,
+    title: input.title,
+    body: input.body,
+    href: input.href ?? null,
+    read: false,
+    createdAt: new Date(),
+  });
 }
 
-export function createActivity(input: {
+export async function createActivity(input: {
   userId: string;
   groupId?: string | null;
   type: string;
   message: string;
   meta?: unknown;
 }) {
-  db.insert(activityEvents)
-    .values({
-      id: createId("act"),
-      userId: input.userId,
-      groupId: input.groupId ?? null,
-      type: input.type,
-      message: input.message,
-      meta: input.meta ? JSON.stringify(input.meta) : null,
-      createdAt: new Date(),
-    })
-    .run();
+  await migrate();
+  await db.insert(activityEvents).values({
+    id: createId("act"),
+    userId: input.userId,
+    groupId: input.groupId ?? null,
+    type: input.type,
+    message: input.message,
+    meta: input.meta ? JSON.stringify(input.meta) : null,
+    createdAt: new Date(),
+  });
 }
 
-export function getDefaultSplits(groupId: string) {
+export async function getDefaultSplits(groupId: string) {
+  await migrate();
   return db
     .select()
     .from(defaultSplits)
@@ -177,7 +186,8 @@ export function getDefaultSplits(groupId: string) {
     .all();
 }
 
-export function getPendingInvites(groupId: string) {
+export async function getPendingInvites(groupId: string) {
+  await migrate();
   return db
     .select()
     .from(groupInvites)

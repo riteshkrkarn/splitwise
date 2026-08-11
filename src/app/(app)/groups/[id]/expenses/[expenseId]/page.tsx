@@ -10,7 +10,6 @@ import { AvatarDisplay } from "@/components/avatar-display";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { db } from "@/db";
-import { migrate } from "@/db/ensure-migrated";
 import {
   expenseComments,
   expenseHistory,
@@ -25,8 +24,6 @@ import { assertGroupMember, getGroupMembers } from "@/lib/group-data";
 import { formatMoney } from "@/lib/utils";
 import { CommentForm, ReceiptForm } from "./expense-forms";
 
-migrate();
-
 export default async function ExpenseDetailPage({
   params,
 }: {
@@ -36,27 +33,27 @@ export default async function ExpenseDetailPage({
   const session = await auth();
   if (!session?.user?.id) return null;
   try {
-    assertGroupMember(id, session.user.id);
+    await assertGroupMember(id, session.user.id);
   } catch {
     notFound();
   }
 
-  const expense = db.select().from(expenses).where(eq(expenses.id, expenseId)).get();
+  const expense = await db.select().from(expenses).where(eq(expenses.id, expenseId)).get();
   if (!expense || expense.groupId !== id) notFound();
 
-  const members = getGroupMembers(id);
+  const members = await getGroupMembers(id);
   const nameById = Object.fromEntries(members.map((m) => [m.userId, m.name]));
-  const splits = db
+  const splits = await db
     .select()
     .from(expenseSplits)
     .where(eq(expenseSplits.expenseId, expenseId))
     .all();
-  const payers = db
+  const payers = await db
     .select()
     .from(expensePayers)
     .where(eq(expensePayers.expenseId, expenseId))
     .all();
-  const comments = db
+  const comments = await db
     .select({
       id: expenseComments.id,
       body: expenseComments.body,
@@ -69,19 +66,19 @@ export default async function ExpenseDetailPage({
     .where(eq(expenseComments.expenseId, expenseId))
     .orderBy(desc(expenseComments.createdAt))
     .all();
-  const history = db
+  const history = await db
     .select()
     .from(expenseHistory)
     .where(eq(expenseHistory.expenseId, expenseId))
     .orderBy(desc(expenseHistory.createdAt))
     .all();
-  const receipt = db
+  const receipt = await db
     .select()
     .from(receipts)
     .where(eq(receipts.expenseId, expenseId))
     .get();
   const items = receipt
-    ? db.select().from(receiptItems).where(eq(receiptItems.receiptId, receipt.id)).all()
+    ? await db.select().from(receiptItems).where(eq(receiptItems.receiptId, receipt.id)).all()
     : [];
 
   return (

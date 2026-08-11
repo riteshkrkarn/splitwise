@@ -1,9 +1,8 @@
 import { migrate as runMigrate } from "./migrate-fn";
 
-let migrated = false;
+let migrating: Promise<void> | null = null;
 
 export function migrate() {
-  if (migrated) return;
-  runMigrate();
-  migrated = true;
+  if (!migrating) migrating = runMigrate();
+  return migrating;
 }

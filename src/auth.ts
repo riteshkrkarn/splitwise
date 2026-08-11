@@ -6,8 +6,6 @@ import { db } from "@/db";
 import { migrate } from "@/db/ensure-migrated";
 import { users } from "@/db/schema";
 
-migrate();
-
 export const { handlers, auth, signIn, signOut } = NextAuth({
   trustHost: true,
   session: { strategy: "jwt" },
@@ -22,13 +20,14 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         password: { label: "Password", type: "password" },
       },
       async authorize(credentials) {
+        await migrate();
         const email = String(credentials?.email ?? "")
           .trim()
           .toLowerCase();
         const password = String(credentials?.password ?? "");
         if (!email || !password) return null;
 
-        const user = db
+        const user = await db
           .select()
           .from(users)
           .where(eq(users.email, email))

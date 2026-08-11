@@ -6,12 +6,9 @@ import { redirect } from "next/navigation";
 import { auth } from "@/auth";
 import type { ActionResult } from "@/actions/auth";
 import { db } from "@/db";
-import { migrate } from "@/db/ensure-migrated";
 import { friendships, users } from "@/db/schema";
 import { createNotification } from "@/lib/group-data";
 import { createId } from "@/lib/id";
-
-migrate();
 
 function orderedPair(a: string, b: string) {
   return a < b ? ([a, b] as const) : ([b, a] as const);
@@ -25,14 +22,14 @@ export async function addFriendAction(
   if (!session?.user?.id) return { error: "Unauthorized" };
 
   const email = String(formData.get("email") ?? "").trim().toLowerCase();
-  const friend = db.select().from(users).where(eq(users.email, email)).get();
+  const friend = await db.select().from(users).where(eq(users.email, email)).get();
   if (!friend) {
     return { error: "No registered user with that email. They need an account first." };
   }
   if (friend.id === session.user.id) return { error: "You cannot add yourself." };
 
   const [userAId, userBId] = orderedPair(session.user.id, friend.id);
-  const existing = db
+  const existing = await db
     .select()
     .from(friendships)
     .where(
@@ -50,17 +47,17 @@ export async function addFriendAction(
   let friendshipId: string;
   if (existing) {
     friendshipId = existing.id;
-    db.update(friendships)
+    await db.update(friendships)
       .set({
         deletedAt: null,
         status: "PENDING",
         requestedBy: session.user.id,
       })
       .where(eq(friendships.id, existing.id))
-      .run();
+      ;
   } else {
     friendshipId = createId("frn");
-    db.insert(friendships)
+    await db.insert(friendships)
       .values({
         id: friendshipId,
         userAId,
@@ -69,10 +66,10 @@ export async function addFriendAction(
         requestedBy: session.user.id,
         createdAt: new Date(),
       })
-      .run();
+      ;
   }
 
-  createNotification({
+  await createNotification({
     userId: friend.id,
     type: "FRIEND_INVITE",
     title: "Friend request",
@@ -89,7 +86,7 @@ export async function acceptFriendRequestAction(friendshipId: string) {
   const session = await auth();
   if (!session?.user?.id) throw new Error("Unauthorized");
 
-  const friendship = db
+  const friendship = await db
     .select()
     .from(friendships)
     .where(eq(friendships.id, friendshipId))
@@ -107,13 +104,13 @@ export async function acceptFriendRequestAction(friendshipId: string) {
     throw new Error("You cannot accept your own request");
   }
 
-  db.update(friendships)
+  await db.update(friendships)
     .set({ status: "ACCEPTED" })
     .where(eq(friendships.id, friendshipId))
-    .run();
+    ;
 
   if (friendship.requestedBy) {
-    createNotification({
+    await createNotification({
       userId: friendship.requestedBy,
       type: "INVITE_ACCEPTED",
       title: "Friend request accepted",
@@ -131,7 +128,7 @@ export async function rejectFriendRequestAction(friendshipId: string) {
   const session = await auth();
   if (!session?.user?.id) throw new Error("Unauthorized");
 
-  const friendship = db
+  const friendship = await db
     .select()
     .from(friendships)
     .where(eq(friendships.id, friendshipId))
@@ -149,13 +146,13 @@ export async function rejectFriendRequestAction(friendshipId: string) {
     throw new Error("You cannot reject your own request");
   }
 
-  db.update(friendships)
+  await db.update(friendships)
     .set({ deletedAt: new Date(), status: "DECLINED" })
     .where(eq(friendships.id, friendshipId))
-    .run();
+    ;
 
   if (friendship.requestedBy) {
-    createNotification({
+    await createNotification({
       userId: friendship.requestedBy,
       type: "INVITE",
       title: "Friend request declined",
@@ -168,7 +165,7 @@ export async function rejectFriendRequestAction(friendshipId: string) {
 }
 
 export async function getMyFriendships(userId: string) {
-  return db
+  return await db
     .select()
     .from(friendships)
     .where(

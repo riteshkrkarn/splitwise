@@ -5,8 +5,6 @@ import { exchangeRates } from "@/db/schema";
 import { createId } from "@/lib/id";
 import { roundMoney } from "@/lib/utils";
 
-migrate();
-
 const FALLBACK_RATES_USD: Record<string, number> = {
   USD: 1,
   INR: 83.5,
@@ -41,8 +39,9 @@ async function fetchLiveRates(base: string): Promise<Record<string, number> | nu
 }
 
 export async function getRates(base = "USD"): Promise<Record<string, number>> {
+  await migrate();
   const today = new Date().toISOString().slice(0, 10);
-  const cached = db
+  const cached = await db
     .select()
     .from(exchangeRates)
     .where(and(eq(exchangeRates.base, base), eq(exchangeRates.date, today)))
@@ -53,7 +52,7 @@ export async function getRates(base = "USD"): Promise<Record<string, number>> {
   const rates = live ?? (base === "USD" ? FALLBACK_RATES_USD : convertFallback(base));
 
   try {
-    db.insert(exchangeRates)
+    await db.insert(exchangeRates)
       .values({
         id: createId("fx"),
         base,
@@ -61,7 +60,7 @@ export async function getRates(base = "USD"): Promise<Record<string, number>> {
         date: today,
         createdAt: new Date(),
       })
-      .run();
+      ;
   } catch {
     // unique constraint — already cached
   }

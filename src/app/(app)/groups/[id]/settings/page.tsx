@@ -17,13 +17,13 @@ export default async function SettingsPage({
   const session = await auth();
   if (!session?.user?.id) return null;
   try {
-    assertGroupMember(id, session.user.id);
+    await assertGroupMember(id, session.user.id);
   } catch {
     notFound();
   }
-  const group = getGroupOrThrow(id);
-  const members = getGroupMembers(id);
-  const defaults = getDefaultSplits(id);
+  const group = await getGroupOrThrow(id);
+  const members = await getGroupMembers(id);
+  const defaults = await getDefaultSplits(id);
   return (
     <SettingsClient
       groupId={id}

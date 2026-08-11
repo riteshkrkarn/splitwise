@@ -6,10 +6,7 @@ import { AvatarDisplay } from "@/components/avatar-display";
 import { NavbarControls } from "@/components/navbar-controls";
 import { Button } from "@/components/ui/button";
 import { db } from "@/db";
-import { migrate } from "@/db/ensure-migrated";
 import { friendships, groupInvites, notifications } from "@/db/schema";
-
-migrate();
 
 const nav = [
   { href: "/dashboard", label: "Home" },
@@ -24,7 +21,7 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
   const userId = session?.user?.id;
 
   const notes = userId
-    ? db
+    ? await db
         .select()
         .from(notifications)
         .where(eq(notifications.userId, userId))
@@ -36,31 +33,34 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
   const unreadCount = notes.filter((n) => !n.read).length;
 
   const pendingGroupInviteIds = userId
-    ? db
-        .select()
-        .from(groupInvites)
-        .where(
-          and(
-            eq(groupInvites.email, session!.user.email),
-            eq(groupInvites.status, "PENDING")
+    ? (
+        await db
+          .select()
+          .from(groupInvites)
+          .where(
+            and(
+              eq(groupInvites.email, session!.user.email),
+              eq(groupInvites.status, "PENDING")
+            )
           )
-        )
-        .all()
-        .map((i) => i.id)
+          .all()
+      ).map((i) => i.id)
     : [];
 
   const pendingFriendIds = userId
-    ? db
-        .select()
-        .from(friendships)
-        .where(
-          and(
-            isNull(friendships.deletedAt),
-            eq(friendships.status, "PENDING"),
-            or(eq(friendships.userAId, userId), eq(friendships.userBId, userId))
+    ? (
+        await db
+          .select()
+          .from(friendships)
+          .where(
+            and(
+              isNull(friendships.deletedAt),
+              eq(friendships.status, "PENDING"),
+              or(eq(friendships.userAId, userId), eq(friendships.userBId, userId))
+            )
           )
-        )
-        .all()
+          .all()
+      )
         .filter((f) => f.requestedBy !== userId)
         .map((f) => f.id)
     : [];

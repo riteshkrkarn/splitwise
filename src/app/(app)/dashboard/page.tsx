@@ -7,7 +7,6 @@ import { Card, EmptyState, PageHeader } from "@/components/ui/card";
 import { NotificationList } from "@/components/notification-list";
 import { markAllNotificationsReadAction } from "@/actions/notifications";
 import { db } from "@/db";
-import { migrate } from "@/db/ensure-migrated";
 import {
   friendships,
   groupInvites,
@@ -18,14 +17,12 @@ import {
 import { getGroupBalances } from "@/lib/group-data";
 import { formatMoney } from "@/lib/utils";
 
-migrate();
-
 export default async function DashboardPage() {
   const session = await auth();
   if (!session?.user?.id) return null;
   const userId = session.user.id;
 
-  const memberships = db
+  const memberships = await db
     .select({
       groupId: groups.id,
       name: groups.name,
@@ -37,14 +34,16 @@ export default async function DashboardPage() {
     .where(and(eq(groupMembers.userId, userId), isNull(groups.deletedAt)))
     .all();
 
-  const groupCards = memberships.map((m) => {
-    const balances = getGroupBalances(m.groupId);
-    const inr = balances.find((b) => b.currency === m.currency) ?? balances[0];
-    const myNet = inr?.netByUser[userId] ?? 0;
-    return { ...m, myNet, currency: inr?.currency ?? m.currency };
-  });
+  const groupCards = await Promise.all(
+    memberships.map(async (m) => {
+      const balances = await getGroupBalances(m.groupId);
+      const inr = balances.find((b) => b.currency === m.currency) ?? balances[0];
+      const myNet = inr?.netByUser[userId] ?? 0;
+      return { ...m, myNet, currency: inr?.currency ?? m.currency };
+    })
+  );
 
-  const notes = db
+  const notes = await db
     .select()
     .from(notifications)
     .where(eq(notifications.userId, userId))
@@ -52,33 +51,36 @@ export default async function DashboardPage() {
     .limit(12)
     .all();
 
-  const pendingGroupInviteIds = db
-    .select()
-    .from(groupInvites)
-    .where(
-      and(
-        eq(groupInvites.email, session.user.email),
-        eq(groupInvites.status, "PENDING")
+  const pendingGroupInviteIds = (
+    await db
+      .select()
+      .from(groupInvites)
+      .where(
+        and(
+          eq(groupInvites.email, session.user.email),
+          eq(groupInvites.status, "PENDING")
+        )
       )
-    )
-    .all()
-    .map((i) => i.id);
+      .all()
+  ).map((i) => i.id);
 
-  const pendingFriendIds = db
-    .select()
-    .from(friendships)
-    .where(
-      and(
-        isNull(friendships.deletedAt),
-        eq(friendships.status, "PENDING"),
-        or(eq(friendships.userAId, userId), eq(friendships.userBId, userId))
+  const pendingFriendIds = (
+    await db
+      .select()
+      .from(friendships)
+      .where(
+        and(
+          isNull(friendships.deletedAt),
+          eq(friendships.status, "PENDING"),
+          or(eq(friendships.userAId, userId), eq(friendships.userBId, userId))
+        )
       )
-    )
-    .all()
+      .all()
+  )
     .filter((f) => f.requestedBy !== userId)
     .map((f) => f.id);
 
-  const friends = db
+  const friends = await db
     .select()
     .from(friendships)
     .where(

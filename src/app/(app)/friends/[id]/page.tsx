@@ -5,7 +5,6 @@ import { ExpenseForm } from "@/components/expense-form";
 import { BalanceList } from "@/components/balance-list";
 import { Card } from "@/components/ui/card";
 import { db } from "@/db";
-import { migrate } from "@/db/ensure-migrated";
 import {
   expensePayers,
   expenseSplits,
@@ -16,8 +15,6 @@ import {
 import { computeNetBalances, summarizeBalances } from "@/lib/balances";
 import { formatMoney } from "@/lib/utils";
 
-migrate();
-
 export default async function FriendshipPage({
   params,
 }: {
@@ -27,7 +24,7 @@ export default async function FriendshipPage({
   const session = await auth();
   if (!session?.user?.id) return null;
 
-  const friendship = db
+  const friendship = await db
     .select()
     .from(friendships)
     .where(
@@ -50,8 +47,16 @@ export default async function FriendshipPage({
     friendship.userAId === session.user.id
       ? friendship.userBId
       : friendship.userAId;
-  const other = db.select().from(users).where(eq(users.id, otherId)).get()!;
-  const me = db.select().from(users).where(eq(users.id, session.user.id)).get()!;
+  const other = (await db
+    .select()
+    .from(users)
+    .where(eq(users.id, otherId))
+    .get())!;
+  const me = (await db
+    .select()
+    .from(users)
+    .where(eq(users.id, session.user.id))
+    .get())!;
 
   const members = [
     { userId: me.id, name: me.name },
@@ -59,28 +64,32 @@ export default async function FriendshipPage({
   ];
   const nameById = Object.fromEntries(members.map((m) => [m.userId, m.name]));
 
-  const friendExpenses = db
+  const friendExpenses = await db
     .select()
     .from(expenses)
     .where(and(eq(expenses.friendshipId, id), isNull(expenses.deletedAt)))
     .orderBy(desc(expenses.date))
     .all();
 
-  const expensePayload = friendExpenses.map((e) => ({
-    currency: e.currency,
-    payers: db
-      .select()
-      .from(expensePayers)
-      .where(eq(expensePayers.expenseId, e.id))
-      .all()
-      .map((p) => ({ userId: p.userId, amount: p.amount })),
-    splits: db
-      .select()
-      .from(expenseSplits)
-      .where(eq(expenseSplits.expenseId, e.id))
-      .all()
-      .map((s) => ({ userId: s.userId, amount: s.amount })),
-  }));
+  const expensePayload = await Promise.all(
+    friendExpenses.map(async (e) => ({
+      currency: e.currency,
+      payers: (
+        await db
+          .select()
+          .from(expensePayers)
+          .where(eq(expensePayers.expenseId, e.id))
+          .all()
+      ).map((p) => ({ userId: p.userId, amount: p.amount })),
+      splits: (
+        await db
+          .select()
+          .from(expenseSplits)
+          .where(eq(expenseSplits.expenseId, e.id))
+          .all()
+      ).map((s) => ({ userId: s.userId, amount: s.amount })),
+    }))
+  );
 
   const balances = summarizeBalances(
     computeNetBalances(expensePayload, [], []),
