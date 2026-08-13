@@ -70,7 +70,11 @@ export default async function GroupPage({
     <div className="space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="flex items-center gap-4">
-          <AvatarDisplay avatarId={group.coverAvatarId} name={group.name} size={56} />
+          <AvatarDisplay
+            avatarId={group.coverAvatarId}
+            name={group.name}
+            size={56}
+          />
           <div>
             <h1 className="page-title">{group.name}</h1>
             <p className="mt-1 text-sm text-muted">
@@ -82,9 +86,6 @@ export default async function GroupPage({
         <div className="flex flex-wrap gap-2">
           <Link href={`/groups/${id}/expenses/new`}>
             <Button>Add expense</Button>
-          </Link>
-          <Link href={`/groups/${id}/settle`}>
-            <Button variant="secondary">Settle up</Button>
           </Link>
           <Link href={`/groups/${id}/settings`}>
             <Button variant="outline">Settings</Button>
@@ -144,7 +145,12 @@ export default async function GroupPage({
         <div className="flex flex-wrap items-end justify-between gap-3 border-b border-border px-5 py-4">
           <h2 className="font-semibold">Expenses</h2>
           <form className="flex flex-wrap gap-2">
-            <Input name="q" placeholder="Search…" defaultValue={sp.q} className="w-40" />
+            <Input
+              name="q"
+              placeholder="Search…"
+              defaultValue={sp.q}
+              className="w-40"
+            />
             <Input
               name="category"
               placeholder="Category"
@@ -182,7 +188,9 @@ export default async function GroupPage({
                       {e.category} · {new Date(e.date).toLocaleDateString()}
                     </p>
                   </div>
-                  <p className="money shrink-0">{formatMoney(e.amount, e.currency)}</p>
+                  <p className="money shrink-0">
+                    {formatMoney(e.amount, e.currency)}
+                  </p>
                 </Link>
               </li>
             ))}
@@ -199,11 +207,17 @@ export default async function GroupPage({
           {settlements.map((s) => (
             <li key={s.id} className="flex flex-wrap justify-between gap-2">
               <span>
-                <span className="font-medium">{nameById[s.fromUserId] ?? "Someone"}</span>
+                <span className="font-medium">
+                  {nameById[s.fromUserId] ?? "Someone"}
+                </span>
                 {" transferred "}
-                <span className="money">{formatMoney(s.amount, s.currency)}</span>
+                <span className="money">
+                  {formatMoney(s.amount, s.currency)}
+                </span>
                 {" to "}
-                <span className="font-medium">{nameById[s.toUserId] ?? "someone"}</span>
+                <span className="font-medium">
+                  {nameById[s.toUserId] ?? "someone"}
+                </span>
                 {s.note ? (
                   <span className="text-muted"> — {s.note}</span>
                 ) : null}
@@ -215,9 +229,7 @@ export default async function GroupPage({
 
       {deleted.length > 0 && (
         <Card>
-          <h2 className="mb-3 text-sm font-semibold text-muted">
-            Deleted
-          </h2>
+          <h2 className="mb-3 text-sm font-semibold text-muted">Deleted</h2>
           <ul className="space-y-2 text-sm">
             {deleted.map((e) => (
               <li key={e.id} className="flex justify-between gap-2">

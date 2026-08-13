@@ -51,7 +51,7 @@ export async function sendPaymentRemindersAction(groupId: string) {
         type: "REMINDER",
         title: "Payment reminder",
         body: `You owe ${nameById[debt.toUserId] ?? "someone"} ${formatMoney(debt.amount, debt.currency)}`,
-        href: `/groups/${groupId}/settle`,
+        href: `/groups/${groupId}`,
       });
     }
   }

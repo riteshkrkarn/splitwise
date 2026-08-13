@@ -33,6 +33,9 @@ export async function createSettlementAction(
   if (!fromUserId || !toUserId || fromUserId === toUserId || !(amount > 0)) {
     return { error: "Pick two different people and a positive amount." };
   }
+  if (fromUserId !== session.user.id) {
+    return { error: "You can only record a payment for a debt you owe." };
+  }
 
   const stayOnPage = String(formData.get("stay") ?? "") === "1";
 

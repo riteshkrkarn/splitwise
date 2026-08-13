@@ -80,7 +80,11 @@ export function BalanceList({
                   ...pairwise.flatMap((d) => [d.fromUserId, d.toUserId]),
                 ]),
               ];
-        const pairs = allMemberPairs(ids, pairwise);
+        const pairs = allMemberPairs(ids, pairwise).filter((pair) =>
+          currentUserId
+            ? pair.aId === currentUserId || pair.bId === currentUserId
+            : true
+        );
         const mine = currentUserId
           ? pairwise.filter(
               (d) =>
@@ -123,8 +127,12 @@ export function BalanceList({
             )}
 
             <div>
-              <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted">
-                Every pair
+              <p className="mb-1 text-xs font-medium uppercase tracking-wide text-muted">
+                Between you and each member
+              </p>
+              <p className="mb-2 text-xs text-muted">
+                You only see your own pairs. Pay part when you owe — leftover
+                stays.
               </p>
               <ul className="divide-y divide-border overflow-hidden rounded-xl border border-border">
                 {pairs.length === 0 && (
@@ -142,6 +150,7 @@ export function BalanceList({
                       currency={s.currency}
                       nameById={nameById}
                       groupId={groupId}
+                      currentUserId={currentUserId}
                     />
                   </li>
                 ))}
@@ -159,53 +168,58 @@ function PairRow({
   currency,
   nameById,
   groupId,
+  currentUserId,
 }: {
   pair: PairRow;
   currency: string;
   nameById: Record<string, string>;
   groupId?: string;
+  currentUserId?: string;
 }) {
   const [paying, setPaying] = useState(false);
-  const aName = nameById[pair.aId] ?? "Someone";
-  const bName = nameById[pair.bId] ?? "Someone";
+  const otherId = currentUserId
+    ? pair.aId === currentUserId
+      ? pair.bId
+      : pair.aId
+    : pair.bId;
+  const otherName = nameById[otherId] ?? "Someone";
   const settled = pair.amount < 0.01 || !pair.fromUserId || !pair.toUserId;
-  const fromName = pair.fromUserId
-    ? (nameById[pair.fromUserId] ?? "Someone")
-    : aName;
-  const toName = pair.toUserId ? (nameById[pair.toUserId] ?? "Someone") : bName;
+  const iOwe = Boolean(currentUserId && pair.fromUserId === currentUserId);
+  const theyOwe = Boolean(currentUserId && pair.toUserId === currentUserId);
 
   return (
     <div className="space-y-2">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <p className="text-sm text-ink">
-            <span className="font-medium">{aName}</span>
-            <span className="text-muted"> · </span>
-            <span className="font-medium">{bName}</span>
-          </p>
+          <p className="text-sm font-medium text-ink">{otherName}</p>
           {settled ? (
             <p className="mt-0.5 text-sm text-muted">Settled</p>
-          ) : (
+          ) : iOwe ? (
             <p className="mt-0.5 text-sm">
-              <span className="font-medium">{fromName}</span>{" "}
-              <span className="text-muted">owes</span>{" "}
-              <span className="font-medium">{toName}</span>{" "}
+              You owe{" "}
               <span className="money">{formatMoney(pair.amount, currency)}</span>
             </p>
+          ) : theyOwe ? (
+            <p className="mt-0.5 text-sm">
+              Owes you{" "}
+              <span className="money">{formatMoney(pair.amount, currency)}</span>
+            </p>
+          ) : (
+            <p className="mt-0.5 text-sm text-muted">Settled</p>
           )}
         </div>
-        {groupId && !settled && pair.fromUserId && pair.toUserId && !paying && (
+        {groupId && iOwe && !paying && (
           <Button
             type="button"
             variant="secondary"
             size="sm"
             onClick={() => setPaying(true)}
           >
-            Pay
+            Pay part
           </Button>
         )}
       </div>
-      {groupId && paying && pair.fromUserId && pair.toUserId && (
+      {groupId && iOwe && paying && pair.fromUserId && pair.toUserId && (
         <PayControl
           groupId={groupId}
           fromUserId={pair.fromUserId}
