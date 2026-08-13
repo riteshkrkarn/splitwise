@@ -16,6 +16,7 @@ import {
 } from "@/db/schema";
 import {
   computeNetBalances,
+  computePairwiseDebts,
   summarizeBalances,
   type BalanceSummary,
 } from "@/lib/balances";
@@ -123,17 +124,15 @@ export async function getGroupExpenseBundle(groupId: string) {
 export async function getGroupBalances(groupId: string): Promise<BalanceSummary[]> {
   const group = await getGroupOrThrow(groupId);
   const { expensePayload, settlements } = await getGroupExpenseBundle(groupId);
-  const net = computeNetBalances(
-    expensePayload,
-    settlements.map((s) => ({
-      fromUserId: s.fromUserId,
-      toUserId: s.toUserId,
-      amount: s.amount,
-      currency: s.currency,
-    })),
-    []
-  );
-  return summarizeBalances(net, group.simplifyDebts);
+  const settlementRows = settlements.map((s) => ({
+    fromUserId: s.fromUserId,
+    toUserId: s.toUserId,
+    amount: s.amount,
+    currency: s.currency,
+  }));
+  const net = computeNetBalances(expensePayload, settlementRows, []);
+  const pairwise = computePairwiseDebts(expensePayload, settlementRows, []);
+  return summarizeBalances(net, group.simplifyDebts, pairwise);
 }
 
 export async function createNotification(input: {

@@ -34,6 +34,8 @@ export async function createSettlementAction(
     return { error: "Pick two different people and a positive amount." };
   }
 
+  const stayOnPage = String(formData.get("stay") ?? "") === "1";
+
   await db.insert(settlements)
     .values({
       id: createId("set"),
@@ -52,18 +54,23 @@ export async function createSettlementAction(
     userId: session.user.id,
     groupId,
     type: "SETTLEMENT",
-    message: `Settlement recorded`,
+    message: `Payment of ${currency} ${amount} recorded`,
   });
 
-  await createNotification({
-    userId: toUserId,
-    groupId,
-    type: "SETTLEMENT",
-    title: "Payment recorded",
-    body: `Someone transferred ${currency} ${amount} to you`,
-    href: `/groups/${groupId}`,
-  });
+  if (toUserId !== session.user.id) {
+    await createNotification({
+      userId: toUserId,
+      groupId,
+      type: "SETTLEMENT",
+      title: "Payment recorded",
+      body: `${session.user.name} recorded a ${currency} ${amount} transfer to you`,
+      href: `/groups/${groupId}`,
+    });
+  }
 
   revalidatePath(`/groups/${groupId}`);
+  revalidatePath(`/groups/${groupId}/settle`);
+  revalidatePath("/dashboard");
+  if (stayOnPage) return { success: "Payment recorded." };
   redirect(`/groups/${groupId}`);
 }

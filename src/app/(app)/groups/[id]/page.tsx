@@ -104,6 +104,8 @@ export default async function GroupPage({
             summaries={balances}
             nameById={nameById}
             currentUserId={session.user.id}
+            memberIds={members.map((m) => m.userId)}
+            groupId={id}
           />
           <form
             action={async () => {

@@ -26,7 +26,7 @@ export default async function SettlePage({
   const balances = await getGroupBalances(id);
   const summary =
     balances.find((b) => b.currency === group.currency) ?? balances[0];
-  const suggestions = summary?.debts ?? [];
+  const suggestions = summary?.pairwiseDebts ?? summary?.debts ?? [];
 
   return (
     <SettleClient

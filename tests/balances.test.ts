@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { computeNetBalances, simplifyDebts } from "@/lib/balances";
+import {
+  computeNetBalances,
+  computePairwiseDebts,
+  simplifyDebts,
+} from "@/lib/balances";
 import { computeSplits } from "@/lib/split-validator";
 
 describe("computeSplits", () => {
@@ -53,5 +57,46 @@ describe("simplifyDebts", () => {
     expect(debts[0].fromUserId).toBe("a");
     expect(debts[0].toUserId).toBe("c");
     expect(debts[0].amount).toBe(20);
+  });
+});
+
+describe("computePairwiseDebts", () => {
+  it("keeps both sides when a user owes one person and is owed by another", () => {
+    const pairwise = computePairwiseDebts(
+      [
+        {
+          currency: "INR",
+          payers: [{ userId: "mayank", amount: 100 }],
+          splits: [
+            { userId: "ritesh", amount: 50 },
+            { userId: "mayank", amount: 50 },
+          ],
+        },
+        {
+          currency: "INR",
+          payers: [{ userId: "ritesh", amount: 80 }],
+          splits: [
+            { userId: "shreshth", amount: 80 },
+            { userId: "ritesh", amount: 0 },
+          ],
+        },
+      ],
+      []
+    );
+    const debts = pairwise.get("INR") ?? [];
+    expect(debts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          fromUserId: "ritesh",
+          toUserId: "mayank",
+          amount: 50,
+        }),
+        expect.objectContaining({
+          fromUserId: "shreshth",
+          toUserId: "ritesh",
+          amount: 80,
+        }),
+      ])
+    );
   });
 });

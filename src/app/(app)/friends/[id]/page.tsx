@@ -12,7 +12,11 @@ import {
   friendships,
   users,
 } from "@/db/schema";
-import { computeNetBalances, summarizeBalances } from "@/lib/balances";
+import {
+  computeNetBalances,
+  computePairwiseDebts,
+  summarizeBalances,
+} from "@/lib/balances";
 import { formatMoney } from "@/lib/utils";
 
 export default async function FriendshipPage({
@@ -93,7 +97,8 @@ export default async function FriendshipPage({
 
   const balances = summarizeBalances(
     computeNetBalances(expensePayload, [], []),
-    true
+    true,
+    computePairwiseDebts(expensePayload, [], [])
   );
 
   // Cross-group totals: also include shared group expenses between the two
@@ -110,6 +115,7 @@ export default async function FriendshipPage({
           summaries={balances}
           nameById={nameById}
           currentUserId={session.user.id}
+          memberIds={members.map((m) => m.userId)}
         />
       </Card>
       <ExpenseForm
