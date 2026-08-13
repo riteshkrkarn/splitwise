@@ -23,25 +23,27 @@ import { createId } from "@/lib/id";
 import {
   computeSplits,
   validatePayers,
+  type ComputedSplit,
+  type PayerInput,
   type SplitMode,
 } from "@/lib/split-validator";
 
-function parseParticipants(formData: FormData) {
-  const participantIds = formData.getAll("participantIds").map(String);
-  return participantIds;
-}
+type ParsedExpense = {
+  description: string;
+  amount: number;
+  currency: string;
+  category: string;
+  notes: string | null;
+  date: Date;
+  splitMode: SplitMode;
+  payers: PayerInput[];
+  splits: ComputedSplit[];
+};
 
-export async function createExpenseAction(
-  groupId: string | null,
-  friendshipId: string | null,
-  _prev: ActionResult,
-  formData: FormData
-): Promise<ActionResult> {
-  const session = await auth();
-  if (!session?.user?.id) return { error: "Unauthorized" };
-
-  if (groupId) await assertGroupMember(groupId, session.user.id);
-
+function parseExpenseForm(
+  formData: FormData,
+  fallbackPayerId: string
+): { ok: true; data: ParsedExpense } | { ok: false; error: string } {
   const description = String(formData.get("description") ?? "").trim();
   const amount = Number(formData.get("amount"));
   const currency = String(formData.get("currency") ?? "INR");
@@ -52,16 +54,15 @@ export async function createExpenseAction(
   const date = dateStr ? new Date(dateStr) : new Date();
 
   if (!description || !(amount > 0)) {
-    return { error: "Description and positive amount are required." };
+    return { ok: false, error: "Description and positive amount are required." };
   }
 
-  const participantIds = parseParticipants(formData);
+  const participantIds = formData.getAll("participantIds").map(String);
   if (participantIds.length === 0) {
-    return { error: "Select at least one participant." };
+    return { ok: false, error: "Select at least one participant." };
   }
 
-  // Payers: either single payerId or multiple payer_<userId>
-  let payers: { userId: string; amount: number }[] = [];
+  let payers: PayerInput[] = [];
   const multi = formData.get("multiPayer") === "on";
   if (multi) {
     for (const uid of participantIds) {
@@ -71,14 +72,14 @@ export async function createExpenseAction(
       if (val > 0) payers.push({ userId: uid, amount: val });
     }
   } else {
-    const payerId = String(formData.get("payerId") ?? session.user.id);
+    const payerId = String(formData.get("payerId") ?? fallbackPayerId);
     payers = [{ userId: payerId, amount }];
   }
 
   try {
     validatePayers(amount, payers);
   } catch (e) {
-    return { error: e instanceof Error ? e.message : "Invalid payers" };
+    return { ok: false, error: e instanceof Error ? e.message : "Invalid payers" };
   }
 
   const splitInputs = participantIds.map((userId) => ({
@@ -94,12 +95,41 @@ export async function createExpenseAction(
       : undefined,
   }));
 
-  let splits;
   try {
-    splits = computeSplits(amount, splitMode, splitInputs);
+    return {
+      ok: true,
+      data: {
+        description,
+        amount,
+        currency,
+        category,
+        notes,
+        date,
+        splitMode,
+        payers,
+        splits: computeSplits(amount, splitMode, splitInputs),
+      },
+    };
   } catch (e) {
-    return { error: e instanceof Error ? e.message : "Invalid splits" };
+    return { ok: false, error: e instanceof Error ? e.message : "Invalid splits" };
   }
+}
+
+export async function createExpenseAction(
+  groupId: string | null,
+  friendshipId: string | null,
+  _prev: ActionResult,
+  formData: FormData
+): Promise<ActionResult> {
+  const session = await auth();
+  if (!session?.user?.id) return { error: "Unauthorized" };
+
+  if (groupId) await assertGroupMember(groupId, session.user.id);
+
+  const parsed = parseExpenseForm(formData, session.user.id);
+  if (!parsed.ok) return { error: parsed.error };
+  const { description, amount, currency, category, notes, date, splitMode, payers, splits } =
+    parsed.data;
 
   const expenseId = createId("exp");
   await db.insert(expenses)
@@ -185,6 +215,92 @@ export async function createExpenseAction(
   }
 
   return { success: "Expense added." };
+}
+
+export async function updateExpenseAction(
+  expenseId: string,
+  _prev: ActionResult,
+  formData: FormData
+): Promise<ActionResult> {
+  const session = await auth();
+  if (!session?.user?.id) return { error: "Unauthorized" };
+
+  const expense = await db
+    .select()
+    .from(expenses)
+    .where(eq(expenses.id, expenseId))
+    .get();
+  if (!expense || expense.deletedAt) return { error: "Expense not found." };
+  if (expense.groupId) await assertGroupMember(expense.groupId, session.user.id);
+
+  const parsed = parseExpenseForm(formData, session.user.id);
+  if (!parsed.ok) return { error: parsed.error };
+  const { description, amount, currency, category, notes, date, splitMode, payers, splits } =
+    parsed.data;
+
+  await db
+    .update(expenses)
+    .set({
+      description,
+      amount,
+      currency,
+      category,
+      notes,
+      date,
+      splitMode,
+      updatedAt: new Date(),
+    })
+    .where(eq(expenses.id, expenseId));
+
+  await db.delete(expenseSplits).where(eq(expenseSplits.expenseId, expenseId));
+  await db.delete(expensePayers).where(eq(expensePayers.expenseId, expenseId));
+
+  for (const s of splits) {
+    await db.insert(expenseSplits).values({
+      id: createId("spl"),
+      expenseId,
+      userId: s.userId,
+      amount: s.amount,
+      shares: s.shares ?? null,
+      percent: s.percent ?? null,
+    });
+  }
+  for (const p of payers) {
+    await db.insert(expensePayers).values({
+      id: createId("pay"),
+      expenseId,
+      userId: p.userId,
+      amount: p.amount,
+    });
+  }
+
+  await db.insert(expenseHistory).values({
+    id: createId("hist"),
+    expenseId,
+    userId: session.user.id,
+    action: "UPDATED",
+    snapshot: JSON.stringify({ description, amount, currency, splits, payers }),
+    createdAt: new Date(),
+  });
+
+  if (expense.groupId) {
+    await createActivity({
+      userId: session.user.id,
+      groupId: expense.groupId,
+      type: "EXPENSE_UPDATED",
+      message: `${session.user.name} updated “${description}”`,
+    });
+    revalidatePath(`/groups/${expense.groupId}`);
+    revalidatePath(`/groups/${expense.groupId}/expenses/${expenseId}`);
+    redirect(`/groups/${expense.groupId}/expenses/${expenseId}`);
+  }
+
+  if (expense.friendshipId) {
+    revalidatePath(`/friends/${expense.friendshipId}`);
+    redirect(`/friends/${expense.friendshipId}`);
+  }
+
+  return { success: "Expense updated." };
 }
 
 export async function softDeleteExpenseAction(expenseId: string) {

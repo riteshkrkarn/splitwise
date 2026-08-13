@@ -1,7 +1,10 @@
 "use client";
 
 import { useActionState, useMemo, useState } from "react";
-import { createExpenseAction } from "@/actions/expenses";
+import {
+  createExpenseAction,
+  updateExpenseAction,
+} from "@/actions/expenses";
 import type { ActionResult } from "@/actions/auth";
 import { Button } from "@/components/ui/button";
 import { Card, Select } from "@/components/ui/card";
@@ -13,6 +16,25 @@ const initial: ActionResult = {};
 
 type Member = { userId: string; name: string };
 
+export type ExpenseFormInitial = {
+  expenseId: string;
+  description: string;
+  amount: number;
+  currency: string;
+  category: string;
+  notes: string | null;
+  date: Date | string;
+  splitMode: string;
+  participantIds: string[];
+  payers: { userId: string; amount: number }[];
+  splits: {
+    userId: string;
+    amount: number;
+    shares: number | null;
+    percent: number | null;
+  }[];
+};
+
 export function ExpenseForm({
   groupId,
   friendshipId,
@@ -21,6 +43,7 @@ export function ExpenseForm({
   defaultSplitMode = "EQUAL",
   defaultSplitValues = {},
   currentUserId,
+  initialExpense,
 }: {
   groupId: string | null;
   friendshipId: string | null;
@@ -29,31 +52,77 @@ export function ExpenseForm({
   defaultSplitMode?: string;
   defaultSplitValues?: Record<string, number>;
   currentUserId: string;
+  initialExpense?: ExpenseFormInitial;
 }) {
-  const bound = createExpenseAction.bind(null, groupId, friendshipId);
-  const [state, action, pending] = useActionState(bound, initial);
-  const [splitMode, setSplitMode] = useState(defaultSplitMode);
-  const [multiPayer, setMultiPayer] = useState(false);
-  const [selected, setSelected] = useState<string[]>(members.map((m) => m.userId));
+  const editing = Boolean(initialExpense);
+  const createBound = createExpenseAction.bind(null, groupId, friendshipId);
+  const updateBound = initialExpense
+    ? updateExpenseAction.bind(null, initialExpense.expenseId)
+    : null;
+  const [state, action, pending] = useActionState(
+    updateBound ?? createBound,
+    initial
+  );
+  const [splitMode, setSplitMode] = useState(
+    initialExpense?.splitMode ?? defaultSplitMode
+  );
+  const [multiPayer, setMultiPayer] = useState(
+    (initialExpense?.payers.length ?? 0) > 1
+  );
+  const [selected, setSelected] = useState<string[]>(
+    initialExpense?.participantIds ?? members.map((m) => m.userId)
+  );
 
   const today = useMemo(() => new Date().toISOString().slice(0, 10), []);
+  const dateValue = initialExpense
+    ? new Date(initialExpense.date).toISOString().slice(0, 10)
+    : today;
+  const defaultPayerId =
+    initialExpense?.payers.length === 1
+      ? initialExpense.payers[0].userId
+      : currentUserId;
+  const payerAmountById = Object.fromEntries(
+    (initialExpense?.payers ?? []).map((p) => [p.userId, p.amount])
+  );
+  const splitById = Object.fromEntries(
+    (initialExpense?.splits ?? []).map((s) => [s.userId, s])
+  );
 
   return (
     <Card className="mx-auto max-w-xl">
-      <h1 className="text-2xl font-bold text-ink">Add expense</h1>
+      <h1 className="text-2xl font-bold text-ink">
+        {editing ? "Edit expense" : "Add expense"}
+      </h1>
       <form action={action} className="mt-6 space-y-4">
         <div>
           <Label htmlFor="description">Description</Label>
-          <Input id="description" name="description" required />
+          <Input
+            id="description"
+            name="description"
+            defaultValue={initialExpense?.description}
+            required
+          />
         </div>
         <div className="grid grid-cols-2 gap-3">
           <div>
             <Label htmlFor="amount">Amount</Label>
-            <Input id="amount" name="amount" type="number" step="0.01" min="0.01" required />
+            <Input
+              id="amount"
+              name="amount"
+              type="number"
+              step="0.01"
+              min="0.01"
+              defaultValue={initialExpense?.amount}
+              required
+            />
           </div>
           <div>
             <Label htmlFor="currency">Currency</Label>
-            <Select id="currency" name="currency" defaultValue={defaultCurrency}>
+            <Select
+              id="currency"
+              name="currency"
+              defaultValue={initialExpense?.currency ?? defaultCurrency}
+            >
               {CURRENCIES.map((c) => (
                 <option key={c} value={c}>
                   {c}
@@ -65,11 +134,15 @@ export function ExpenseForm({
         <div className="grid grid-cols-2 gap-3">
           <div>
             <Label htmlFor="date">Date</Label>
-            <Input id="date" name="date" type="date" defaultValue={today} />
+            <Input id="date" name="date" type="date" defaultValue={dateValue} />
           </div>
           <div>
             <Label htmlFor="category">Category</Label>
-            <Select id="category" name="category" defaultValue="General">
+            <Select
+              id="category"
+              name="category"
+              defaultValue={initialExpense?.category ?? "General"}
+            >
               {CATEGORIES.map((c) => (
                 <option key={c} value={c}>
                   {c}
@@ -80,7 +153,11 @@ export function ExpenseForm({
         </div>
         <div>
           <Label htmlFor="notes">Notes</Label>
-          <Input id="notes" name="notes" />
+          <Input
+            id="notes"
+            name="notes"
+            defaultValue={initialExpense?.notes ?? ""}
+          />
         </div>
 
         <div>
@@ -132,7 +209,13 @@ export function ExpenseForm({
                   : splitMode === "PERCENTAGE"
                     ? `percent_${uid}`
                     : `shares_${uid}`;
-              const def = defaultSplitValues[uid];
+              const existing = splitById[uid];
+              const def =
+                splitMode === "EXACT"
+                  ? existing?.amount
+                  : splitMode === "PERCENTAGE"
+                    ? existing?.percent
+                    : existing?.shares;
               return (
                 <div key={uid} className="flex items-center gap-2">
                   <span className="w-28 truncate text-sm">{name}</span>
@@ -140,7 +223,7 @@ export function ExpenseForm({
                     name={field}
                     type="number"
                     step="0.01"
-                    defaultValue={def}
+                    defaultValue={def ?? defaultSplitValues[uid]}
                     required
                   />
                 </div>
@@ -162,7 +245,7 @@ export function ExpenseForm({
         {!multiPayer ? (
           <div>
             <Label htmlFor="payerId">Paid by</Label>
-            <Select id="payerId" name="payerId" defaultValue={currentUserId}>
+            <Select id="payerId" name="payerId" defaultValue={defaultPayerId}>
               {members.map((m) => (
                 <option key={m.userId} value={m.userId}>
                   {m.name}
@@ -177,7 +260,12 @@ export function ExpenseForm({
               return (
                 <div key={uid} className="flex items-center gap-2">
                   <span className="w-28 truncate text-sm">{name} paid</span>
-                  <Input name={`payer_${uid}`} type="number" step="0.01" defaultValue={0} />
+                  <Input
+                    name={`payer_${uid}`}
+                    type="number"
+                    step="0.01"
+                    defaultValue={payerAmountById[uid] ?? 0}
+                  />
                 </div>
               );
             })}
@@ -186,7 +274,13 @@ export function ExpenseForm({
 
         {state.error && <p className="text-sm text-danger">{state.error}</p>}
         <Button type="submit" disabled={pending}>
-          Save expense
+          {pending
+            ? editing
+              ? "Saving…"
+              : "Adding…"
+            : editing
+              ? "Save changes"
+              : "Save expense"}
         </Button>
       </form>
     </Card>

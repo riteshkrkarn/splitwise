@@ -129,9 +129,16 @@ export default async function FriendshipPage({
         <h2 className="mb-3 font-semibold">Expenses</h2>
         <ul className="space-y-2 text-sm">
           {friendExpenses.map((e) => (
-            <li key={e.id} className="flex justify-between">
-              <span>{e.description}</span>
-              <span>{formatMoney(e.amount, e.currency)}</span>
+            <li key={e.id} className="flex justify-between gap-3">
+              <div className="min-w-0">
+                <p className="font-medium">{e.description}</p>
+                <p className="text-xs text-muted">
+                  Added by {nameById[e.createdById] ?? "someone"}
+                </p>
+              </div>
+              <span className="money shrink-0">
+                {formatMoney(e.amount, e.currency)}
+              </span>
             </li>
           ))}
         </ul>

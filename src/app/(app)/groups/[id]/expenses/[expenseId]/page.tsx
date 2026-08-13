@@ -95,17 +95,27 @@ export default async function ExpenseDetailPage({
             <p className="text-muted">
               {formatMoney(expense.amount, expense.currency)} · {expense.category}
             </p>
+            <p className="mt-1 text-sm text-ink">
+              Added by {nameById[expense.createdById] ?? "someone"}
+            </p>
             {expense.deletedAt && (
               <p className="mt-1 text-sm text-danger">Deleted</p>
             )}
           </div>
           <div className="flex gap-2">
             {!expense.deletedAt ? (
-              <form action={softDeleteExpenseAction.bind(null, expenseId)}>
-                <Button type="submit" variant="danger" size="sm">
-                  Delete
-                </Button>
-              </form>
+              <>
+                <Link href={`/groups/${id}/expenses/${expenseId}/edit`}>
+                  <Button type="button" variant="secondary" size="sm">
+                    Edit
+                  </Button>
+                </Link>
+                <form action={softDeleteExpenseAction.bind(null, expenseId)}>
+                  <Button type="submit" variant="danger" size="sm">
+                    Delete
+                  </Button>
+                </form>
+              </>
             ) : (
               <form action={restoreExpenseAction.bind(null, expenseId)}>
                 <Button type="submit" variant="secondary" size="sm">

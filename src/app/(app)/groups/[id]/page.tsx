@@ -1,15 +1,16 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { and, desc, eq, isNotNull, isNull, like } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, isNull, like } from "drizzle-orm";
 import { auth } from "@/auth";
 import { sendPaymentRemindersAction } from "@/actions/notifications";
 import { AvatarDisplay } from "@/components/avatar-display";
 import { BalanceList } from "@/components/balance-list";
 import { Button } from "@/components/ui/button";
-import { Card, EmptyState } from "@/components/ui/card";
+import { Card, EmptyState, Select } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { db } from "@/db";
-import { expenses } from "@/db/schema";
+import { expensePayers, expenses, users } from "@/db/schema";
+import { CATEGORIES } from "@/lib/utils";
 import {
   assertGroupMember,
   getGroupBalances,
@@ -26,7 +27,12 @@ export default async function GroupPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ q?: string; category?: string }>;
+  searchParams: Promise<{
+    q?: string;
+    category?: string;
+    addedBy?: string;
+    paidBy?: string;
+  }>;
 }) {
   const { id } = await params;
   const sp = await searchParams;
@@ -48,6 +54,18 @@ export default async function GroupPage({
   const conditions = [eq(expenses.groupId, id)];
   if (sp.q) conditions.push(like(expenses.description, `%${sp.q}%`));
   if (sp.category) conditions.push(eq(expenses.category, sp.category));
+  if (sp.addedBy) conditions.push(eq(expenses.createdById, sp.addedBy));
+  if (sp.paidBy) {
+    const paidRows = await db
+      .select({ expenseId: expensePayers.expenseId })
+      .from(expensePayers)
+      .where(eq(expensePayers.userId, sp.paidBy))
+      .all();
+    const paidIds = [...new Set(paidRows.map((r) => r.expenseId))];
+    conditions.push(
+      paidIds.length > 0 ? inArray(expenses.id, paidIds) : eq(expenses.id, "__none__")
+    );
+  }
 
   const active = await db
     .select()
@@ -55,6 +73,39 @@ export default async function GroupPage({
     .where(and(...conditions, isNull(expenses.deletedAt)))
     .orderBy(desc(expenses.date))
     .all();
+
+  const payerRows =
+    active.length === 0
+      ? []
+      : await db
+          .select()
+          .from(expensePayers)
+          .where(
+            inArray(
+              expensePayers.expenseId,
+              active.map((e) => e.id)
+            )
+          )
+          .all();
+  const creatorIds = [...new Set(active.map((e) => e.createdById))];
+  const creatorRows =
+    creatorIds.length === 0
+      ? []
+      : await db
+          .select({ id: users.id, name: users.name })
+          .from(users)
+          .where(inArray(users.id, creatorIds))
+          .all();
+  const creatorNameById = {
+    ...nameById,
+    ...Object.fromEntries(creatorRows.map((u) => [u.id, u.name])),
+  };
+  const payersByExpense = new Map<string, string[]>();
+  for (const p of payerRows) {
+    const list = payersByExpense.get(p.expenseId) ?? [];
+    list.push(creatorNameById[p.userId] ?? nameById[p.userId] ?? "Someone");
+    payersByExpense.set(p.expenseId, list);
+  }
 
   const deleted = await db
     .select()
@@ -149,24 +200,65 @@ export default async function GroupPage({
               name="q"
               placeholder="Search…"
               defaultValue={sp.q}
-              className="w-40"
-            />
-            <Input
-              name="category"
-              placeholder="Category"
-              defaultValue={sp.category}
               className="w-36"
             />
+            <Select
+              name="category"
+              defaultValue={sp.category ?? ""}
+              className="h-11 w-36"
+              aria-label="Category"
+            >
+              <option value="">All categories</option>
+              {CATEGORIES.map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
+            </Select>
+            <Select
+              name="addedBy"
+              defaultValue={sp.addedBy ?? ""}
+              className="h-11 w-40"
+              aria-label="Added by"
+            >
+              <option value="">Anyone added</option>
+              {members.map((m) => (
+                <option key={m.userId} value={m.userId}>
+                  Added by {m.name}
+                </option>
+              ))}
+            </Select>
+            <Select
+              name="paidBy"
+              defaultValue={sp.paidBy ?? ""}
+              className="h-11 w-40"
+              aria-label="Paid by"
+            >
+              <option value="">Anyone paid</option>
+              {members.map((m) => (
+                <option key={m.userId} value={m.userId}>
+                  Paid by {m.name}
+                </option>
+              ))}
+            </Select>
             <Button type="submit" variant="secondary" size="sm">
-              Search
+              Filter
             </Button>
           </form>
         </div>
         {active.length === 0 ? (
           <div className="p-5">
             <EmptyState
-              title="No expenses yet"
-              description="Add the first shared cost so balances stay accurate."
+              title={
+                sp.q || sp.category || sp.addedBy || sp.paidBy
+                  ? "No matching expenses"
+                  : "No expenses yet"
+              }
+              description={
+                sp.q || sp.category || sp.addedBy || sp.paidBy
+                  ? "Try clearing a filter or searching a different name."
+                  : "Add the first shared cost so balances stay accurate."
+              }
               action={
                 <Link href={`/groups/${id}/expenses/new`}>
                   <Button size="sm">Add expense</Button>
@@ -178,20 +270,31 @@ export default async function GroupPage({
           <ul className="divide-y divide-border">
             {active.map((e) => (
               <li key={e.id}>
-                <Link
-                  href={`/groups/${id}/expenses/${e.id}`}
-                  className="flex items-center justify-between gap-3 px-5 py-3.5 transition-colors hover:bg-bg"
-                >
-                  <div className="min-w-0">
+                <div className="flex items-center gap-3 px-5 py-3.5">
+                  <Link
+                    href={`/groups/${id}/expenses/${e.id}`}
+                    className="min-w-0 flex-1 transition-colors hover:text-primary"
+                  >
                     <p className="truncate font-medium">{e.description}</p>
+                    <p className="text-sm text-ink">
+                      Added by {creatorNameById[e.createdById] ?? "someone"}
+                    </p>
                     <p className="text-xs text-muted">
                       {e.category} · {new Date(e.date).toLocaleDateString()}
+                      {payersByExpense.get(e.id)?.length
+                        ? ` · paid by ${payersByExpense.get(e.id)!.join(", ")}`
+                        : ""}
                     </p>
-                  </div>
+                  </Link>
                   <p className="money shrink-0">
                     {formatMoney(e.amount, e.currency)}
                   </p>
-                </Link>
+                  <Link href={`/groups/${id}/expenses/${e.id}/edit`}>
+                    <Button type="button" variant="ghost" size="sm">
+                      Edit
+                    </Button>
+                  </Link>
+                </div>
               </li>
             ))}
           </ul>
