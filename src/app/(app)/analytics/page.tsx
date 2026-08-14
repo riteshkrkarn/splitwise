@@ -1,81 +1,117 @@
-import { and, eq, isNull } from "drizzle-orm";
+import { redirect } from "next/navigation";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { auth } from "@/auth";
-import AnalyticsCharts from "./analytics-charts";
+import AnalyticsChartsLoader from "./analytics-charts-loader";
 import { db } from "@/db";
 import { expenses, groupMembers, groups, users } from "@/db/schema";
-import { getGroupBalances, getGroupMembers } from "@/lib/group-data";
+import { getGroupBalances } from "@/lib/group-data";
+import { formatMoney } from "@/lib/utils";
 
 export default async function AnalyticsPage() {
   const session = await auth();
-  if (!session?.user?.id) return null;
+  if (!session?.user?.id) redirect("/login");
   const userId = session.user.id;
 
   const memberships = await db
-    .select({ groupId: groups.id })
+    .select({ groupId: groups.id, currency: groups.currency })
     .from(groupMembers)
     .innerJoin(groups, eq(groups.id, groupMembers.groupId))
     .where(and(eq(groupMembers.userId, userId), isNull(groups.deletedAt)))
     .all();
 
-  const allExpenses = (
-    await Promise.all(
-      memberships.map((m) =>
-        db
-          .select()
+  const groupIds = memberships.map((m) => m.groupId);
+  const displayCurrency = memberships[0]?.currency ?? "INR";
+
+  const categoryRows =
+    groupIds.length === 0
+      ? []
+      : await db
+          .select({
+            category: expenses.category,
+            currency: expenses.currency,
+            total: sql<number>`sum(${expenses.amount})`.mapWith(Number),
+          })
           .from(expenses)
-          .where(and(eq(expenses.groupId, m.groupId), isNull(expenses.deletedAt)))
-          .all()
-      )
-    )
-  ).flat();
+          .where(
+            and(inArray(expenses.groupId, groupIds), isNull(expenses.deletedAt))
+          )
+          .groupBy(expenses.category, expenses.currency)
+          .all();
 
-  const catMap = new Map<string, number>();
-  const monthMap = new Map<string, number>();
-  for (const e of allExpenses) {
-    catMap.set(e.category, (catMap.get(e.category) ?? 0) + e.amount);
-    const key = `${e.date.getFullYear()}-${String(e.date.getMonth() + 1).padStart(2, "0")}`;
-    monthMap.set(key, (monthMap.get(key) ?? 0) + e.amount);
-  }
+  const monthRows =
+    groupIds.length === 0
+      ? []
+      : await db
+          .select({
+            month: sql<string>`strftime('%Y-%m', ${expenses.date} / 1000, 'unixepoch')`,
+            currency: expenses.currency,
+            total: sql<number>`sum(${expenses.amount})`.mapWith(Number),
+          })
+          .from(expenses)
+          .where(
+            and(inArray(expenses.groupId, groupIds), isNull(expenses.deletedAt))
+          )
+          .groupBy(
+            sql`strftime('%Y-%m', ${expenses.date} / 1000, 'unixepoch')`,
+            expenses.currency
+          )
+          .all();
 
-  const friendNets = new Map<string, number>();
-  for (const m of memberships) {
-    const members = await getGroupMembers(m.groupId);
-    const balances = await getGroupBalances(m.groupId);
+  const byCategory = categoryRows
+    .filter((r) => r.currency === displayCurrency)
+    .map((r) => ({ name: r.category, total: r.total }));
+
+  const byMonth = monthRows
+    .filter((r) => r.currency === displayCurrency)
+    .sort((a, b) => a.month.localeCompare(b.month))
+    .map((r) => ({ name: r.month, total: r.total }));
+
+  const balanceResults = await Promise.all(
+    memberships.map((m) => getGroupBalances(m.groupId))
+  );
+
+  const friendNets = new Map<string, { net: number; currency: string }>();
+  for (const balances of balanceResults) {
     for (const summary of balances) {
-      const myNet = summary.netByUser[userId] ?? 0;
-      // distribute rough pairwise via debts involving me
-      for (const d of summary.debts) {
+      if (summary.currency !== displayCurrency) continue;
+      for (const d of summary.pairwiseDebts ?? summary.debts) {
         if (d.fromUserId === userId) {
-          friendNets.set(
-            d.toUserId,
-            (friendNets.get(d.toUserId) ?? 0) - d.amount
-          );
+          const prev = friendNets.get(d.toUserId);
+          friendNets.set(d.toUserId, {
+            currency: d.currency,
+            net: (prev?.net ?? 0) - d.amount,
+          });
         } else if (d.toUserId === userId) {
-          friendNets.set(
-            d.fromUserId,
-            (friendNets.get(d.fromUserId) ?? 0) + d.amount
-          );
+          const prev = friendNets.get(d.fromUserId);
+          friendNets.set(d.fromUserId, {
+            currency: d.currency,
+            net: (prev?.net ?? 0) + d.amount,
+          });
         }
       }
-      void myNet;
-      void members;
     }
   }
 
-  const crossGroup = await Promise.all(
-    [...friendNets.entries()].map(async ([id, net]) => {
-      const u = await db.select().from(users).where(eq(users.id, id)).get();
-      return { name: u?.name ?? id, net };
-    })
-  );
+  const friendIds = [...friendNets.keys()];
+  const friendUsers =
+    friendIds.length === 0
+      ? []
+      : await db.select().from(users).where(inArray(users.id, friendIds)).all();
+  const nameById = Object.fromEntries(friendUsers.map((u) => [u.id, u.name]));
+
+  const crossGroup = [...friendNets.entries()].map(([id, v]) => ({
+    name: nameById[id] ?? id,
+    net: v.net,
+    currency: v.currency,
+    label: formatMoney(Math.abs(v.net), v.currency),
+  }));
 
   return (
-    <AnalyticsCharts
-      byCategory={[...catMap.entries()].map(([name, total]) => ({ name, total }))}
-      byMonth={[...monthMap.entries()]
-        .sort(([a], [b]) => a.localeCompare(b))
-        .map(([name, total]) => ({ name, total }))}
+    <AnalyticsChartsLoader
+      byCategory={byCategory}
+      byMonth={byMonth}
       crossGroup={crossGroup}
+      currency={displayCurrency}
     />
   );
 }

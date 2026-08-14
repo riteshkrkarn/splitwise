@@ -1,6 +1,12 @@
 import { NextResponse } from "next/server";
 import { getGroupExportData } from "@/actions/advanced";
 
+function csvCell(value: string) {
+  let v = value.replace(/"/g, '""');
+  if (/^[=+\-@]/.test(v)) v = `'${v}`;
+  return `"${v}"`;
+}
+
 export async function GET(
   req: Request,
   { params }: { params: Promise<{ id: string }> }
@@ -14,7 +20,15 @@ export async function GET(
   );
 
   if (format === "json") {
-    return NextResponse.json(data, {
+    const payload = {
+      ...data,
+      members: data.members.map((m) =>
+        data.isOwner
+          ? m
+          : { id: m.id, userId: m.userId, name: m.name, avatarId: m.avatarId, role: m.role, joinedAt: m.joinedAt }
+      ),
+    };
+    return NextResponse.json(payload, {
       headers: {
         "Content-Disposition": `attachment; filename="group-${id}.json"`,
       },
@@ -25,11 +39,11 @@ export async function GET(
     "type,description,amount,currency,date,from,to,note",
     ...data.expenses.map(
       (e) =>
-        `expense,"${e.description.replace(/"/g, '""')}",${e.amount},${e.currency},${new Date(e.date).toISOString()},,,,`
+        `expense,${csvCell(e.description)},${e.amount},${e.currency},${new Date(e.date).toISOString()},,,,`
     ),
     ...data.settlements.map(
       (s) =>
-        `settlement,"transfer",${s.amount},${s.currency},${new Date(s.date).toISOString()},"${nameById[s.fromUserId] ?? s.fromUserId}","${nameById[s.toUserId] ?? s.toUserId}","${(s.note ?? "").replace(/"/g, '""')}"`
+        `settlement,${csvCell("transfer")},${s.amount},${s.currency},${new Date(s.date).toISOString()},${csvCell(nameById[s.fromUserId] ?? s.fromUserId)},${csvCell(nameById[s.toUserId] ?? s.toUserId)},${csvCell(s.note ?? "")}`
     ),
   ];
 

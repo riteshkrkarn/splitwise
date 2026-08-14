@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { desc, eq } from "drizzle-orm";
 import { auth } from "@/auth";
 import {
@@ -31,55 +31,65 @@ export default async function ExpenseDetailPage({
 }) {
   const { id, expenseId } = await params;
   const session = await auth();
-  if (!session?.user?.id) return null;
+  if (!session?.user?.id) redirect("/login");
   try {
     await assertGroupMember(id, session.user.id);
   } catch {
     notFound();
   }
 
-  const expense = await db.select().from(expenses).where(eq(expenses.id, expenseId)).get();
+  const expense = await db
+    .select()
+    .from(expenses)
+    .where(eq(expenses.id, expenseId))
+    .get();
   if (!expense || expense.groupId !== id) notFound();
 
-  const members = await getGroupMembers(id);
+  const [members, splits, payers, comments, history, receipt] =
+    await Promise.all([
+      getGroupMembers(id),
+      db
+        .select()
+        .from(expenseSplits)
+        .where(eq(expenseSplits.expenseId, expenseId))
+        .all(),
+      db
+        .select()
+        .from(expensePayers)
+        .where(eq(expensePayers.expenseId, expenseId))
+        .all(),
+      db
+        .select({
+          id: expenseComments.id,
+          body: expenseComments.body,
+          createdAt: expenseComments.createdAt,
+          name: users.name,
+          avatarId: users.avatarId,
+        })
+        .from(expenseComments)
+        .innerJoin(users, eq(users.id, expenseComments.userId))
+        .where(eq(expenseComments.expenseId, expenseId))
+        .orderBy(desc(expenseComments.createdAt))
+        .all(),
+      db
+        .select()
+        .from(expenseHistory)
+        .where(eq(expenseHistory.expenseId, expenseId))
+        .orderBy(desc(expenseHistory.createdAt))
+        .all(),
+      db.select().from(receipts).where(eq(receipts.expenseId, expenseId)).get(),
+    ]);
+
   const nameById = Object.fromEntries(members.map((m) => [m.userId, m.name]));
-  const splits = await db
-    .select()
-    .from(expenseSplits)
-    .where(eq(expenseSplits.expenseId, expenseId))
-    .all();
-  const payers = await db
-    .select()
-    .from(expensePayers)
-    .where(eq(expensePayers.expenseId, expenseId))
-    .all();
-  const comments = await db
-    .select({
-      id: expenseComments.id,
-      body: expenseComments.body,
-      createdAt: expenseComments.createdAt,
-      name: users.name,
-      avatarId: users.avatarId,
-    })
-    .from(expenseComments)
-    .innerJoin(users, eq(users.id, expenseComments.userId))
-    .where(eq(expenseComments.expenseId, expenseId))
-    .orderBy(desc(expenseComments.createdAt))
-    .all();
-  const history = await db
-    .select()
-    .from(expenseHistory)
-    .where(eq(expenseHistory.expenseId, expenseId))
-    .orderBy(desc(expenseHistory.createdAt))
-    .all();
-  const receipt = await db
-    .select()
-    .from(receipts)
-    .where(eq(receipts.expenseId, expenseId))
-    .get();
   const items = receipt
-    ? await db.select().from(receiptItems).where(eq(receiptItems.receiptId, receipt.id)).all()
+    ? await db
+        .select()
+        .from(receiptItems)
+        .where(eq(receiptItems.receiptId, receipt.id))
+        .all()
     : [];
+
+  const isCreator = expense.createdById === session.user.id;
 
   return (
     <div className="mx-auto max-w-2xl space-y-4">
@@ -89,9 +99,7 @@ export default async function ExpenseDetailPage({
       <Card>
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h1 className="text-2xl font-bold text-ink">
-              {expense.description}
-            </h1>
+            <h1 className="text-2xl font-bold text-ink">{expense.description}</h1>
             <p className="text-muted">
               {formatMoney(expense.amount, expense.currency)} · {expense.category}
             </p>
@@ -105,29 +113,45 @@ export default async function ExpenseDetailPage({
           <div className="flex gap-2">
             {!expense.deletedAt ? (
               <>
-                {expense.createdById === session.user.id && (
+                {isCreator && (
                   <Link href={`/groups/${id}/expenses/${expenseId}/edit`}>
                     <Button type="button" variant="secondary" size="sm">
                       Edit
                     </Button>
                   </Link>
                 )}
-                <form action={softDeleteExpenseAction.bind(null, expenseId)}>
-                  <Button type="submit" variant="danger" size="sm">
-                    Delete
-                  </Button>
-                </form>
+                {isCreator && (
+                  <form
+                    action={async () => {
+                      "use server";
+                      await softDeleteExpenseAction(expenseId);
+                    }}
+                  >
+                    <Button type="submit" variant="danger" size="sm">
+                      Delete
+                    </Button>
+                  </form>
+                )}
               </>
             ) : (
-              <form action={restoreExpenseAction.bind(null, expenseId)}>
-                <Button type="submit" variant="secondary" size="sm">
-                  Restore
-                </Button>
-              </form>
+              isCreator && (
+                <form
+                  action={async () => {
+                    "use server";
+                    await restoreExpenseAction(expenseId);
+                  }}
+                >
+                  <Button type="submit" variant="secondary" size="sm">
+                    Restore
+                  </Button>
+                </form>
+              )
             )}
           </div>
         </div>
-        {expense.notes && <p className="mt-3 text-sm text-muted">{expense.notes}</p>}
+        {expense.notes && (
+          <p className="mt-3 text-sm text-muted">{expense.notes}</p>
+        )}
         <div className="mt-4 grid gap-4 sm:grid-cols-2">
           <div>
             <h2 className="text-sm font-semibold">Paid by</h2>
@@ -174,9 +198,12 @@ export default async function ExpenseDetailPage({
           <div className="mb-3 text-sm">
             <p>Merchant: {receipt.merchant ?? "—"}</p>
             <p>Scanned total: {receipt.total}</p>
-            {receipt.filePath && (
-              <a className="text-accent underline" href={receipt.filePath}>
-                View file
+            {receipt.filePath && receipt.filePath !== "none" && (
+              <a
+                className="text-accent underline"
+                href={`/groups/${id}/expenses/${expenseId}/receipt`}
+              >
+                Download receipt
               </a>
             )}
             <ul className="mt-2">

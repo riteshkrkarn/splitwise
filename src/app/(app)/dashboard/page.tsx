@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { and, desc, eq, isNull, or } from "drizzle-orm";
+import { redirect } from "next/navigation";
+import { and, eq, isNull, or } from "drizzle-orm";
 import { auth } from "@/auth";
 import { AvatarDisplay } from "@/components/avatar-display";
 import { Button } from "@/components/ui/button";
@@ -7,90 +8,65 @@ import { Card, EmptyState, PageHeader } from "@/components/ui/card";
 import { NotificationList } from "@/components/notification-list";
 import { markAllNotificationsReadAction } from "@/actions/notifications";
 import { db } from "@/db";
+import { friendships, groupMembers, groups } from "@/db/schema";
 import {
-  friendships,
-  groupInvites,
-  groupMembers,
-  groups,
-  notifications,
-} from "@/db/schema";
-import { getGroupBalances } from "@/lib/group-data";
+  getGroupBalances,
+  getNotificationsForUser,
+  getPendingFriendIdsForUser,
+  getPendingInviteIdsForEmail,
+} from "@/lib/group-data";
 import { formatMoney } from "@/lib/utils";
 
 export default async function DashboardPage() {
   const session = await auth();
-  if (!session?.user?.id) return null;
+  if (!session?.user?.id) redirect("/login");
   const userId = session.user.id;
 
-  const memberships = await db
-    .select({
-      groupId: groups.id,
-      name: groups.name,
-      coverAvatarId: groups.coverAvatarId,
-      currency: groups.currency,
-    })
-    .from(groupMembers)
-    .innerJoin(groups, eq(groups.id, groupMembers.groupId))
-    .where(and(eq(groupMembers.userId, userId), isNull(groups.deletedAt)))
-    .all();
+  const [memberships, notes, pendingGroupInviteIds, pendingFriendIds, friends] =
+    await Promise.all([
+      db
+        .select({
+          groupId: groups.id,
+          name: groups.name,
+          coverAvatarId: groups.coverAvatarId,
+          currency: groups.currency,
+        })
+        .from(groupMembers)
+        .innerJoin(groups, eq(groups.id, groupMembers.groupId))
+        .where(and(eq(groupMembers.userId, userId), isNull(groups.deletedAt)))
+        .all(),
+      getNotificationsForUser(userId),
+      getPendingInviteIdsForEmail(session.user.email),
+      getPendingFriendIdsForUser(userId),
+      db
+        .select()
+        .from(friendships)
+        .where(
+          and(
+            isNull(friendships.deletedAt),
+            eq(friendships.status, "ACCEPTED"),
+            or(eq(friendships.userAId, userId), eq(friendships.userBId, userId))
+          )
+        )
+        .all(),
+    ]);
 
   const groupCards = await Promise.all(
     memberships.map(async (m) => {
       const balances = await getGroupBalances(m.groupId);
-      const inr = balances.find((b) => b.currency === m.currency) ?? balances[0];
-      const myNet = inr?.netByUser[userId] ?? 0;
-      return { ...m, myNet, currency: inr?.currency ?? m.currency };
+      const nets = balances
+        .map((b) => ({
+          currency: b.currency,
+          myNet: b.netByUser[userId] ?? 0,
+        }))
+        .filter((b) => Math.abs(b.myNet) > 0.009);
+      const primary =
+        nets.find((b) => b.currency === m.currency) ??
+        nets[0] ??
+        { currency: m.currency, myNet: 0 };
+      return { ...m, nets, myNet: primary.myNet, currency: primary.currency };
     })
   );
-
-  const notes = await db
-    .select()
-    .from(notifications)
-    .where(eq(notifications.userId, userId))
-    .orderBy(desc(notifications.createdAt))
-    .limit(12)
-    .all();
-
-  const pendingGroupInviteIds = (
-    await db
-      .select()
-      .from(groupInvites)
-      .where(
-        and(
-          eq(groupInvites.email, session.user.email),
-          eq(groupInvites.status, "PENDING")
-        )
-      )
-      .all()
-  ).map((i) => i.id);
-
-  const pendingFriendIds = (
-    await db
-      .select()
-      .from(friendships)
-      .where(
-        and(
-          isNull(friendships.deletedAt),
-          eq(friendships.status, "PENDING"),
-          or(eq(friendships.userAId, userId), eq(friendships.userBId, userId))
-        )
-      )
-      .all()
-  )
-    .filter((f) => f.requestedBy !== userId)
-    .map((f) => f.id);
-
-  const friends = await db
-    .select()
-    .from(friendships)
-    .where(
-      and(
-        isNull(friendships.deletedAt),
-        eq(friendships.status, "ACCEPTED"),
-        or(eq(friendships.userAId, userId), eq(friendships.userBId, userId))
-      )
-    )
-    .all();
 
   return (
     <div className="space-y-8">
@@ -130,24 +106,29 @@ export default async function DashboardPage() {
                     size={44}
                   />
                   <div className="min-w-0 flex-1">
-                    <p className="truncate font-semibold text-ink">
-                      {g.name}
-                    </p>
-                    <p
-                      className={`text-sm money ${
-                        g.myNet > 0.009
-                          ? "text-owed"
-                          : g.myNet < -0.009
-                            ? "text-owe"
-                            : "text-muted"
-                      }`}
-                    >
-                      {g.myNet === 0
-                        ? "Settled up"
-                        : g.myNet > 0
-                          ? `You’re owed ${formatMoney(g.myNet, g.currency)}`
-                          : `You owe ${formatMoney(Math.abs(g.myNet), g.currency)}`}
-                    </p>
+                    <p className="truncate font-semibold text-ink">{g.name}</p>
+                    {g.nets.length === 0 ? (
+                      <p className="text-sm money text-muted">Settled up</p>
+                    ) : (
+                      <div className="space-y-0.5">
+                        {g.nets.map((n) => (
+                          <p
+                            key={n.currency}
+                            className={`text-sm money ${
+                              n.myNet > 0.009
+                                ? "text-owed"
+                                : n.myNet < -0.009
+                                  ? "text-owe"
+                                  : "text-muted"
+                            }`}
+                          >
+                            {n.myNet > 0
+                              ? `You’re owed ${formatMoney(n.myNet, n.currency)}`
+                              : `You owe ${formatMoney(Math.abs(n.myNet), n.currency)}`}
+                          </p>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 </Link>
               </li>

@@ -15,13 +15,14 @@ import {
 import type { ActionResult } from "@/actions/auth";
 import {
   assertGroupMember,
+  assertGroupOwner,
   createActivity,
   createNotification,
   getGroupMembers,
   getGroupOrThrow,
 } from "@/lib/group-data";
 import { createId } from "@/lib/id";
-import { MAX_GROUP_MEMBERS } from "@/lib/utils";
+import { CURRENCIES, MAX_GROUP_MEMBERS } from "@/lib/utils";
 
 export async function createGroupAction(
   _prev: ActionResult,
@@ -49,14 +50,13 @@ export async function createGroupAction(
     })
     ;
 
-  await db.insert(groupMembers)
-    .values({
-      id: createId("gmem"),
-      groupId: id,
-      userId: session.user.id,
-      joinedAt: new Date(),
-    })
-    ;
+  await db.insert(groupMembers).values({
+    id: createId("gmem"),
+    groupId: id,
+    userId: session.user.id,
+    role: "OWNER",
+    joinedAt: new Date(),
+  });
 
   await createActivity({
     userId: session.user.id,
@@ -179,43 +179,44 @@ export async function acceptInviteAction(inviteId: string) {
     throw new Error("This invite was sent to a different account.");
   }
 
-  const memberCount =
-    (
-      await db
-        .select({ value: count() })
-        .from(groupMembers)
-        .where(eq(groupMembers.groupId, invite.groupId))
-        .get()
-    )?.value ?? 0;
-  if (memberCount >= MAX_GROUP_MEMBERS) {
-    throw new Error("Group is full (max 5).");
-  }
+  await db.transaction(async (tx) => {
+    const memberCount =
+      (
+        await tx
+          .select({ value: count() })
+          .from(groupMembers)
+          .where(eq(groupMembers.groupId, invite.groupId))
+          .get()
+      )?.value ?? 0;
+    if (memberCount >= MAX_GROUP_MEMBERS) {
+      throw new Error("Group is full (max 5).");
+    }
 
-  const already = await db
-    .select()
-    .from(groupMembers)
-    .where(
-      and(
-        eq(groupMembers.groupId, invite.groupId),
-        eq(groupMembers.userId, session.user.id)
+    const already = await tx
+      .select()
+      .from(groupMembers)
+      .where(
+        and(
+          eq(groupMembers.groupId, invite.groupId),
+          eq(groupMembers.userId, session.user.id)
+        )
       )
-    )
-    .get();
-  if (!already) {
-    await db.insert(groupMembers)
-      .values({
+      .get();
+    if (!already) {
+      await tx.insert(groupMembers).values({
         id: createId("gmem"),
         groupId: invite.groupId,
         userId: session.user.id,
+        role: "MEMBER",
         joinedAt: new Date(),
-      })
-      ;
-  }
+      });
+    }
 
-  await db.update(groupInvites)
-    .set({ status: "ACCEPTED" })
-    .where(eq(groupInvites.id, invite.id))
-    ;
+    await tx
+      .update(groupInvites)
+      .set({ status: "ACCEPTED" })
+      .where(eq(groupInvites.id, invite.id));
+  });
 
   const group = await getGroupOrThrow(invite.groupId);
 
@@ -282,15 +283,23 @@ export async function updateGroupSettingsAction(
 ): Promise<ActionResult> {
   const session = await auth();
   if (!session?.user?.id) return { error: "Unauthorized" };
-  await assertGroupMember(groupId, session.user.id);
+  try {
+    await assertGroupOwner(groupId, session.user.id);
+  } catch {
+    return { error: "Only the group owner can change settings." };
+  }
 
   const name = String(formData.get("name") ?? "").trim();
   const coverAvatarId = Number(formData.get("coverAvatarId") ?? 1);
   const currency = String(formData.get("currency") ?? "INR");
   const simplifyDebts = formData.get("simplifyDebts") === "on";
   const defaultSplitMode = String(formData.get("defaultSplitMode") ?? "EQUAL");
+  if (!(CURRENCIES as readonly string[]).includes(currency)) {
+    return { error: "Invalid currency." };
+  }
 
-  await db.update(groups)
+  await db
+    .update(groups)
     .set({
       name: name || (await getGroupOrThrow(groupId)).name,
       coverAvatarId: Math.min(5, Math.max(1, coverAvatarId || 1)),
@@ -299,8 +308,7 @@ export async function updateGroupSettingsAction(
       defaultSplitMode,
       updatedAt: new Date(),
     })
-    .where(eq(groups.id, groupId))
-    ;
+    .where(eq(groups.id, groupId));
 
   // Optional default split values: value_<userId>
   const members = await getGroupMembers(groupId);
@@ -325,16 +333,24 @@ export async function updateGroupSettingsAction(
 export async function leaveGroupAction(groupId: string) {
   const session = await auth();
   if (!session?.user?.id) throw new Error("Unauthorized");
-  await assertGroupMember(groupId, session.user.id);
+  const me = await assertGroupMember(groupId, session.user.id);
+  if (me.role === "OWNER") {
+    const others = (await getGroupMembers(groupId)).filter(
+      (m) => m.userId !== session.user.id
+    );
+    if (others.length > 0) {
+      throw new Error("Transfer ownership or remove members before leaving.");
+    }
+  }
 
-  await db.delete(groupMembers)
+  await db
+    .delete(groupMembers)
     .where(
       and(
         eq(groupMembers.groupId, groupId),
         eq(groupMembers.userId, session.user.id)
       )
-    )
-    ;
+    );
 
   await createActivity({
     userId: session.user.id,
@@ -349,14 +365,14 @@ export async function leaveGroupAction(groupId: string) {
 export async function removeMemberAction(groupId: string, userId: string) {
   const session = await auth();
   if (!session?.user?.id) throw new Error("Unauthorized");
-  await assertGroupMember(groupId, session.user.id);
+  await assertGroupOwner(groupId, session.user.id);
   if (userId === session.user.id) throw new Error("Use leave group instead");
 
-  await db.delete(groupMembers)
+  await db
+    .delete(groupMembers)
     .where(
       and(eq(groupMembers.groupId, groupId), eq(groupMembers.userId, userId))
-    )
-    ;
+    );
 
   revalidatePath(`/groups/${groupId}/settings`);
 }
@@ -364,38 +380,39 @@ export async function removeMemberAction(groupId: string, userId: string) {
 export async function softDeleteGroupAction(groupId: string) {
   const session = await auth();
   if (!session?.user?.id) throw new Error("Unauthorized");
-  await assertGroupMember(groupId, session.user.id);
-  await db.update(groups)
+  await assertGroupOwner(groupId, session.user.id);
+  await db
+    .update(groups)
     .set({ deletedAt: new Date(), updatedAt: new Date() })
-    .where(eq(groups.id, groupId))
-    ;
+    .where(eq(groups.id, groupId));
   redirect("/dashboard");
 }
 
 export async function restoreGroupAction(groupId: string) {
   const session = await auth();
   if (!session?.user?.id) throw new Error("Unauthorized");
-  await db.update(groups)
-    .set({ deletedAt: null, updatedAt: new Date() })
-    .where(eq(groups.id, groupId))
-    ;
-  // re-add membership if missing
-  const member = await db
+
+  const prior = await db
     .select()
     .from(groupMembers)
     .where(
-      and(eq(groupMembers.groupId, groupId), eq(groupMembers.userId, session.user.id))
+      and(
+        eq(groupMembers.groupId, groupId),
+        eq(groupMembers.userId, session.user.id)
+      )
     )
     .get();
-  if (!member) {
-    await db.insert(groupMembers)
-      .values({
-        id: createId("gmem"),
-        groupId,
-        userId: session.user.id,
-        joinedAt: new Date(),
-      })
-      ;
+  if (!prior || prior.role !== "OWNER") {
+    throw new Error("Only a prior group owner can restore this group.");
   }
+
+  const group = await db.select().from(groups).where(eq(groups.id, groupId)).get();
+  if (!group?.deletedAt) throw new Error("Group is not deleted");
+
+  await db
+    .update(groups)
+    .set({ deletedAt: null, updatedAt: new Date() })
+    .where(eq(groups.id, groupId));
+
   redirect(`/groups/${groupId}`);
 }

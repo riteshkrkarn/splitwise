@@ -39,7 +39,8 @@ export default function RegisterPage() {
             <PasswordInput
               id="password"
               name="password"
-              minLength={6}
+              minLength={10}
+              maxLength={72}
               autoComplete="new-password"
               required
             />

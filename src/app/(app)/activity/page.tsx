@@ -1,12 +1,23 @@
-import { and, desc, eq, inArray, isNull, or } from "drizzle-orm";
+import Link from "next/link";
+import { redirect } from "next/navigation";
+import { and, desc, eq, inArray, isNull, or, lt } from "drizzle-orm";
 import { auth } from "@/auth";
+import { Button } from "@/components/ui/button";
 import { Card, EmptyState, PageHeader } from "@/components/ui/card";
 import { db } from "@/db";
 import { activityEvents, groupMembers, groups } from "@/db/schema";
 
-export default async function ActivityPage() {
+const PAGE_SIZE = 50;
+
+export default async function ActivityPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ cursor?: string }>;
+}) {
   const session = await auth();
-  if (!session?.user?.id) return null;
+  if (!session?.user?.id) redirect("/login");
+  const sp = await searchParams;
+  const cursor = sp.cursor ? Number(sp.cursor) : null;
 
   const memberships = await db
     .select({ groupId: groupMembers.groupId })
@@ -18,21 +29,31 @@ export default async function ActivityPage() {
     .all();
   const groupIds = memberships.map((m) => m.groupId);
 
-  const events =
+  const baseWhere =
     groupIds.length === 0
-      ? []
-      : await db
-          .select()
-          .from(activityEvents)
-          .where(
-            or(
-              eq(activityEvents.userId, session.user.id),
-              inArray(activityEvents.groupId, groupIds)
-            )
-          )
-          .orderBy(desc(activityEvents.createdAt))
-          .limit(50)
-          .all();
+      ? eq(activityEvents.userId, session.user.id)
+      : or(
+          eq(activityEvents.userId, session.user.id),
+          inArray(activityEvents.groupId, groupIds)
+        );
+
+  const events = await db
+    .select()
+    .from(activityEvents)
+    .where(
+      cursor
+        ? and(baseWhere, lt(activityEvents.createdAt, new Date(cursor)))
+        : baseWhere
+    )
+    .orderBy(desc(activityEvents.createdAt))
+    .limit(PAGE_SIZE + 1)
+    .all();
+
+  const hasMore = events.length > PAGE_SIZE;
+  const page = hasMore ? events.slice(0, PAGE_SIZE) : events;
+  const nextCursor = hasMore
+    ? page[page.length - 1]?.createdAt.getTime()
+    : null;
 
   return (
     <div className="space-y-6">
@@ -40,7 +61,7 @@ export default async function ActivityPage() {
         title="Activity"
         description="Recent changes across your groups."
       />
-      {events.length === 0 ? (
+      {page.length === 0 ? (
         <EmptyState
           title="Nothing here yet"
           description="When people add expenses, settle up, or join groups, it shows up here."
@@ -48,7 +69,7 @@ export default async function ActivityPage() {
       ) : (
         <Card className="overflow-hidden p-0">
           <ul className="divide-y divide-border">
-            {events.map((e) => (
+            {page.map((e) => (
               <li key={e.id} className="px-5 py-3.5">
                 <p className="text-sm font-medium text-ink">{e.message}</p>
                 <p className="mt-0.5 text-xs text-muted">
@@ -58,6 +79,15 @@ export default async function ActivityPage() {
               </li>
             ))}
           </ul>
+          {nextCursor && (
+            <div className="border-t border-border px-5 py-3">
+              <Link href={`/activity?cursor=${nextCursor}`}>
+                <Button variant="secondary" size="sm">
+                  Load more
+                </Button>
+              </Link>
+            </div>
+          )}
         </Card>
       )}
     </div>

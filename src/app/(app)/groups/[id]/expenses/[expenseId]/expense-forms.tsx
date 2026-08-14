@@ -1,6 +1,7 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { useActionState, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { addCommentAction } from "@/actions/expenses";
 import { attachReceiptAction } from "@/actions/advanced";
 import type { ActionResult } from "@/actions/auth";
@@ -10,8 +11,14 @@ import { Input } from "@/components/ui/input";
 const initial: ActionResult = {};
 
 export function CommentForm({ expenseId }: { expenseId: string }) {
+  const router = useRouter();
   const bound = addCommentAction.bind(null, expenseId);
   const [state, action, pending] = useActionState(bound, initial);
+
+  useEffect(() => {
+    if (state.success) router.refresh();
+  }, [state.success, router]);
+
   return (
     <form action={action} className="flex gap-2">
       <Input name="body" placeholder="Add a comment" required />
@@ -30,6 +37,7 @@ export function ReceiptForm({
   expenseId: string;
   members: { userId: string; name: string }[];
 }) {
+  const router = useRouter();
   const [items, setItems] = useState([
     { name: "", price: "", assignedToUserId: members[0]?.userId ?? "" },
   ]);
@@ -50,12 +58,17 @@ export function ReceiptForm({
     );
     const res = await attachReceiptAction(expenseId, formData);
     setMessage(res.error ?? res.success ?? "");
+    if (res.success) router.refresh();
   }
 
   return (
     <form action={onSubmit} className="space-y-3 text-sm">
       <Input name="merchant" placeholder="Merchant" />
-      <Input name="receipt" type="file" accept="image/*,.pdf,.txt" />
+      <Input
+        name="receipt"
+        type="file"
+        accept="image/jpeg,image/png,image/webp,application/pdf"
+      />
       <div className="space-y-2">
         <p className="font-medium">Line items</p>
         {items.map((item, idx) => (

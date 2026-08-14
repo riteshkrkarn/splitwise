@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import { z } from "zod";
 import { auth } from "@/auth";
 import type { ActionResult } from "@/actions/auth";
 import { db } from "@/db";
@@ -10,8 +11,21 @@ import {
   assertGroupMember,
   createActivity,
   createNotification,
+  getGroupBalances,
+  getGroupMembers,
 } from "@/lib/group-data";
 import { createId } from "@/lib/id";
+import { CURRENCIES, roundMoney } from "@/lib/utils";
+
+const settlementSchema = z.object({
+  fromUserId: z.string().min(1),
+  toUserId: z.string().min(1),
+  amount: z.coerce.number().positive(),
+  currency: z.string().min(1),
+  note: z.string().max(500).optional().nullable(),
+  date: z.string().optional(),
+  stay: z.string().optional(),
+});
 
 export async function createSettlementAction(
   groupId: string,
@@ -22,36 +36,65 @@ export async function createSettlementAction(
   if (!session?.user?.id) return { error: "Unauthorized" };
   await assertGroupMember(groupId, session.user.id);
 
-  const fromUserId = String(formData.get("fromUserId") ?? "");
-  const toUserId = String(formData.get("toUserId") ?? "");
-  const amount = Number(formData.get("amount"));
-  const currency = String(formData.get("currency") ?? "INR");
-  const note = String(formData.get("note") ?? "") || null;
-  const dateStr = String(formData.get("date") ?? "");
+  const parsed = settlementSchema.safeParse({
+    fromUserId: formData.get("fromUserId"),
+    toUserId: formData.get("toUserId"),
+    amount: formData.get("amount"),
+    currency: formData.get("currency") ?? "INR",
+    note: String(formData.get("note") ?? "") || null,
+    date: formData.get("date"),
+    stay: formData.get("stay"),
+  });
+  if (!parsed.success) {
+    return { error: "Pick two different people and a positive amount." };
+  }
+
+  const { fromUserId, toUserId, amount, currency, note, date: dateStr, stay } =
+    parsed.data;
   const date = dateStr ? new Date(dateStr) : new Date();
 
-  if (!fromUserId || !toUserId || fromUserId === toUserId || !(amount > 0)) {
+  if (fromUserId === toUserId) {
     return { error: "Pick two different people and a positive amount." };
   }
   if (fromUserId !== session.user.id) {
     return { error: "You can only record a payment for a debt you owe." };
   }
+  if (!(CURRENCIES as readonly string[]).includes(currency)) {
+    return { error: "Invalid currency." };
+  }
 
-  const stayOnPage = String(formData.get("stay") ?? "") === "1";
+  const members = await getGroupMembers(groupId);
+  const memberIds = new Set(members.map((m) => m.userId));
+  if (!memberIds.has(fromUserId) || !memberIds.has(toUserId)) {
+    return { error: "Both people must be group members." };
+  }
 
-  await db.insert(settlements)
-    .values({
-      id: createId("set"),
-      groupId,
-      fromUserId,
-      toUserId,
-      amount,
-      currency,
-      date,
-      note,
-      createdAt: new Date(),
-    })
-    ;
+  const balances = await getGroupBalances(groupId);
+  const summary = balances.find((b) => b.currency === currency);
+  const debts = summary?.pairwiseDebts ?? summary?.debts ?? [];
+  const owed = debts.find(
+    (d) => d.fromUserId === fromUserId && d.toUserId === toUserId
+  );
+  if (!owed) {
+    return { error: "No outstanding debt in that currency between those people." };
+  }
+  if (roundMoney(amount) > roundMoney(owed.amount) + 0.009) {
+    return {
+      error: `Amount cannot exceed ${owed.amount.toFixed(2)} ${currency}.`,
+    };
+  }
+
+  await db.insert(settlements).values({
+    id: createId("set"),
+    groupId,
+    fromUserId,
+    toUserId,
+    amount: roundMoney(amount),
+    currency,
+    date,
+    note,
+    createdAt: new Date(),
+  });
 
   await createActivity({
     userId: session.user.id,
@@ -74,6 +117,6 @@ export async function createSettlementAction(
   revalidatePath(`/groups/${groupId}`);
   revalidatePath(`/groups/${groupId}/settle`);
   revalidatePath("/dashboard");
-  if (stayOnPage) return { success: "Payment recorded." };
+  if (stay === "1") return { success: "Payment recorded." };
   redirect(`/groups/${groupId}`);
 }

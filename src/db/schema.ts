@@ -62,11 +62,15 @@ export const groupMembers = sqliteTable(
     userId: text("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
+    role: text("role").notNull().default("MEMBER"),
     joinedAt: integer("joined_at", { mode: "timestamp_ms" })
       .notNull()
       .default(sql`(unixepoch() * 1000)`),
   },
-  (t) => [uniqueIndex("group_members_unique").on(t.groupId, t.userId)]
+  (t) => [
+    uniqueIndex("group_members_unique").on(t.groupId, t.userId),
+    index("group_members_user_idx").on(t.userId),
+  ]
 );
 
 export const groupInvites = sqliteTable(
@@ -119,7 +123,11 @@ export const friendships = sqliteTable(
       .notNull()
       .default(sql`(unixepoch() * 1000)`),
   },
-  (t) => [uniqueIndex("friendships_unique").on(t.userAId, t.userBId)]
+  (t) => [
+    uniqueIndex("friendships_unique").on(t.userAId, t.userBId),
+    index("friendships_user_a_idx").on(t.userAId),
+    index("friendships_user_b_status_idx").on(t.userBId, t.status),
+  ]
 );
 
 export const expenses = sqliteTable(
@@ -155,6 +163,7 @@ export const expenses = sqliteTable(
   (t) => [
     index("expenses_group_idx").on(t.groupId),
     index("expenses_friendship_idx").on(t.friendshipId),
+    index("expenses_group_active_date_idx").on(t.groupId, t.deletedAt, t.date),
   ]
 );
 
@@ -172,7 +181,10 @@ export const expenseSplits = sqliteTable(
     shares: real("shares"),
     percent: real("percent"),
   },
-  (t) => [uniqueIndex("expense_splits_unique").on(t.expenseId, t.userId)]
+  (t) => [
+    uniqueIndex("expense_splits_unique").on(t.expenseId, t.userId),
+    index("expense_splits_expense_idx").on(t.expenseId),
+  ]
 );
 
 export const expensePayers = sqliteTable(
@@ -187,58 +199,74 @@ export const expensePayers = sqliteTable(
       .references(() => users.id, { onDelete: "cascade" }),
     amount: real("amount").notNull(),
   },
-  (t) => [uniqueIndex("expense_payers_unique").on(t.expenseId, t.userId)]
+  (t) => [
+    uniqueIndex("expense_payers_unique").on(t.expenseId, t.userId),
+    index("expense_payers_expense_idx").on(t.expenseId),
+    index("expense_payers_user_idx").on(t.userId),
+  ]
 );
 
-export const expenseComments = sqliteTable("expense_comments", {
-  id: text("id").primaryKey(),
-  expenseId: text("expense_id")
-    .notNull()
-    .references(() => expenses.id, { onDelete: "cascade" }),
-  userId: text("user_id")
-    .notNull()
-    .references(() => users.id, { onDelete: "cascade" }),
-  body: text("body").notNull(),
-  createdAt: integer("created_at", { mode: "timestamp_ms" })
-    .notNull()
-    .default(sql`(unixepoch() * 1000)`),
-});
+export const expenseComments = sqliteTable(
+  "expense_comments",
+  {
+    id: text("id").primaryKey(),
+    expenseId: text("expense_id")
+      .notNull()
+      .references(() => expenses.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    body: text("body").notNull(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" })
+      .notNull()
+      .default(sql`(unixepoch() * 1000)`),
+  },
+  (t) => [index("expense_comments_expense_idx").on(t.expenseId)]
+);
 
-export const expenseHistory = sqliteTable("expense_history", {
-  id: text("id").primaryKey(),
-  expenseId: text("expense_id")
-    .notNull()
-    .references(() => expenses.id, { onDelete: "cascade" }),
-  userId: text("user_id")
-    .notNull()
-    .references(() => users.id, { onDelete: "cascade" }),
-  action: text("action").notNull(),
-  snapshot: text("snapshot").notNull(),
-  createdAt: integer("created_at", { mode: "timestamp_ms" })
-    .notNull()
-    .default(sql`(unixepoch() * 1000)`),
-});
+export const expenseHistory = sqliteTable(
+  "expense_history",
+  {
+    id: text("id").primaryKey(),
+    expenseId: text("expense_id")
+      .notNull()
+      .references(() => expenses.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    action: text("action").notNull(),
+    snapshot: text("snapshot").notNull(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" })
+      .notNull()
+      .default(sql`(unixepoch() * 1000)`),
+  },
+  (t) => [index("expense_history_expense_idx").on(t.expenseId)]
+);
 
-export const settlements = sqliteTable("settlements", {
-  id: text("id").primaryKey(),
-  groupId: text("group_id").references(() => groups.id, {
-    onDelete: "cascade",
-  }),
-  fromUserId: text("from_user_id")
-    .notNull()
-    .references(() => users.id),
-  toUserId: text("to_user_id")
-    .notNull()
-    .references(() => users.id),
-  amount: real("amount").notNull(),
-  currency: text("currency").notNull().default("INR"),
-  date: integer("date", { mode: "timestamp_ms" }).notNull(),
-  note: text("note"),
-  deletedAt: integer("deleted_at", { mode: "timestamp_ms" }),
-  createdAt: integer("created_at", { mode: "timestamp_ms" })
-    .notNull()
-    .default(sql`(unixepoch() * 1000)`),
-});
+export const settlements = sqliteTable(
+  "settlements",
+  {
+    id: text("id").primaryKey(),
+    groupId: text("group_id").references(() => groups.id, {
+      onDelete: "cascade",
+    }),
+    fromUserId: text("from_user_id")
+      .notNull()
+      .references(() => users.id),
+    toUserId: text("to_user_id")
+      .notNull()
+      .references(() => users.id),
+    amount: real("amount").notNull(),
+    currency: text("currency").notNull().default("INR"),
+    date: integer("date", { mode: "timestamp_ms" }).notNull(),
+    note: text("note"),
+    deletedAt: integer("deleted_at", { mode: "timestamp_ms" }),
+    createdAt: integer("created_at", { mode: "timestamp_ms" })
+      .notNull()
+      .default(sql`(unixepoch() * 1000)`),
+  },
+  (t) => [index("settlements_group_idx").on(t.groupId, t.deletedAt)]
+);
 
 export const notifications = sqliteTable(
   "notifications",
@@ -259,7 +287,10 @@ export const notifications = sqliteTable(
       .notNull()
       .default(sql`(unixepoch() * 1000)`),
   },
-  (t) => [index("notifications_user_idx").on(t.userId)]
+  (t) => [
+    index("notifications_user_idx").on(t.userId),
+    index("notifications_user_created_idx").on(t.userId, t.createdAt),
+  ]
 );
 
 export const activityEvents = sqliteTable(
@@ -279,7 +310,21 @@ export const activityEvents = sqliteTable(
       .notNull()
       .default(sql`(unixepoch() * 1000)`),
   },
-  (t) => [index("activity_group_idx").on(t.groupId)]
+  (t) => [
+    index("activity_group_idx").on(t.groupId),
+    index("activity_user_created_idx").on(t.userId, t.createdAt),
+  ]
+);
+
+export const rateLimits = sqliteTable(
+  "rate_limits",
+  {
+    id: text("id").primaryKey(),
+    key: text("key").notNull(),
+    count: integer("count").notNull().default(0),
+    windowStart: integer("window_start", { mode: "timestamp_ms" }).notNull(),
+  },
+  (t) => [uniqueIndex("rate_limits_key_unique").on(t.key)]
 );
 
 export const ious = sqliteTable("ious", {

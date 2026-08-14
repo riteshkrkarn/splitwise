@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useTransition } from "react";
+import { useEffect, useId, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Bell, Check, Moon, RefreshCw, Sun } from "lucide-react";
 import { markNotificationReadAction } from "@/actions/notifications";
@@ -36,20 +36,60 @@ export function NavbarControls({
   const [pending, startTransition] = useTransition();
   const [dismissedIds, setDismissedIds] = useState<string[]>([]);
   const panelRef = useRef<HTMLDivElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const panelId = useId();
 
   useEffect(() => {
     function onClick(e: MouseEvent) {
       if (!panelRef.current?.contains(e.target as Node)) setOpen(false);
     }
-    if (open) document.addEventListener("mousedown", onClick);
-    return () => document.removeEventListener("mousedown", onClick);
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        setOpen(false);
+        buttonRef.current?.focus();
+      }
+    }
+    if (open) {
+      document.addEventListener("mousedown", onClick);
+      document.addEventListener("keydown", onKey);
+    }
+    return () => {
+      document.removeEventListener("mousedown", onClick);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  useEffect(() => {
+    if (!open || !panelRef.current) return;
+    const focusable = panelRef.current.querySelectorAll<HTMLElement>(
+      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+    );
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    function onTab(e: KeyboardEvent) {
+      if (e.key !== "Tab" || focusable.length === 0) return;
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last?.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first?.focus();
+      }
+    }
+    document.addEventListener("keydown", onTab);
+    first?.focus();
+    return () => document.removeEventListener("keydown", onTab);
   }, [open]);
 
   const dismissed = new Set(dismissedIds);
   const visible = notifications.filter((n) => !n.read && !dismissed.has(n.id));
-  const badge = Math.max(0, unreadCount - dismissedIds.filter((id) =>
-    notifications.some((n) => n.id === id && !n.read)
-  ).length);
+  const badge = Math.max(
+    0,
+    unreadCount -
+      dismissedIds.filter((id) =>
+        notifications.some((n) => n.id === id && !n.read)
+      ).length
+  );
 
   const groupSet = new Set(pendingGroupInviteIds);
   const friendSet = new Set(pendingFriendIds);
@@ -78,12 +118,15 @@ export function NavbarControls({
 
       <div className="relative" ref={panelRef}>
         <Button
+          ref={buttonRef}
           type="button"
           variant="ghost"
           size="icon"
           aria-label="Notifications"
           title="Notifications"
           aria-expanded={open}
+          aria-controls={panelId}
+          aria-haspopup="dialog"
           onClick={() => setOpen((v) => !v)}
           className="relative"
         >
@@ -96,7 +139,13 @@ export function NavbarControls({
         </Button>
 
         {open && (
-          <div className="absolute right-0 z-50 mt-2 w-[min(100vw-2rem,22rem)] overflow-hidden rounded-2xl border border-border bg-surface shadow-[0_12px_40px_var(--shadow)]">
+          <div
+            id={panelId}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Notifications"
+            className="absolute right-0 z-50 mt-2 w-[min(100vw-2rem,22rem)] overflow-hidden rounded-2xl border border-border bg-surface shadow-[0_12px_40px_var(--shadow)]"
+          >
             <div className="border-b border-border px-4 py-3">
               <p className="text-sm font-semibold">Notifications</p>
             </div>

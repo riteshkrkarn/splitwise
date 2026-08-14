@@ -1,4 +1,4 @@
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { auth } from "@/auth";
 import SettleClient from "./settle-client";
 import {
@@ -15,18 +15,20 @@ export default async function SettlePage({
 }) {
   const { id } = await params;
   const session = await auth();
-  if (!session?.user?.id) return null;
+  if (!session?.user?.id) redirect("/login");
   try {
     await assertGroupMember(id, session.user.id);
   } catch {
     notFound();
   }
-  const group = await getGroupOrThrow(id);
-  const members = await getGroupMembers(id);
-  const balances = await getGroupBalances(id);
+  const [group, members, balances] = await Promise.all([
+    getGroupOrThrow(id),
+    getGroupMembers(id),
+    getGroupBalances(id),
+  ]);
   const summary =
     balances.find((b) => b.currency === group.currency) ?? balances[0];
-  const suggestions = summary?.pairwiseDebts ?? summary?.debts ?? [];
+  const suggestions = summary?.debts ?? [];
 
   return (
     <SettleClient

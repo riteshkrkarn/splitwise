@@ -1,6 +1,6 @@
 import Link from "next/link";
-import { notFound } from "next/navigation";
-import { and, desc, eq, inArray, isNotNull, isNull, like } from "drizzle-orm";
+import { notFound, redirect } from "next/navigation";
+import { and, desc, eq, inArray, isNotNull, isNull, like, sql } from "drizzle-orm";
 import { auth } from "@/auth";
 import { sendPaymentRemindersAction } from "@/actions/notifications";
 import { AvatarDisplay } from "@/components/avatar-display";
@@ -22,6 +22,8 @@ import {
 import { formatMoney } from "@/lib/utils";
 import { InviteForm } from "./group-forms";
 
+const PAGE_SIZE = 25;
+
 export default async function GroupPage({
   params,
   searchParams,
@@ -32,12 +34,13 @@ export default async function GroupPage({
     category?: string;
     addedBy?: string;
     paidBy?: string;
+    page?: string;
   }>;
 }) {
   const { id } = await params;
   const sp = await searchParams;
   const session = await auth();
-  if (!session?.user?.id) return null;
+  if (!session?.user?.id) redirect("/login");
 
   try {
     await assertGroupMember(id, session.user.id);
@@ -45,11 +48,18 @@ export default async function GroupPage({
     notFound();
   }
 
-  const group = await getGroupOrThrow(id);
-  const members = await getGroupMembers(id);
+  const page = Math.max(1, Number(sp.page ?? 1) || 1);
+  const offset = (page - 1) * PAGE_SIZE;
+
+  const [group, members, balances, invites, bundle] = await Promise.all([
+    getGroupOrThrow(id),
+    getGroupMembers(id),
+    getGroupBalances(id),
+    getPendingInvites(id),
+    getGroupExpenseBundle(id),
+  ]);
   const nameById = Object.fromEntries(members.map((m) => [m.userId, m.name]));
-  const balances = await getGroupBalances(id);
-  const invites = await getPendingInvites(id);
+  const { settlements } = bundle;
 
   const conditions = [eq(expenses.groupId, id)];
   if (sp.q) conditions.push(like(expenses.description, `%${sp.q}%`));
@@ -59,20 +69,48 @@ export default async function GroupPage({
     const paidRows = await db
       .select({ expenseId: expensePayers.expenseId })
       .from(expensePayers)
-      .where(eq(expensePayers.userId, sp.paidBy))
+      .innerJoin(expenses, eq(expenses.id, expensePayers.expenseId))
+      .where(
+        and(
+          eq(expensePayers.userId, sp.paidBy),
+          eq(expenses.groupId, id),
+          isNull(expenses.deletedAt)
+        )
+      )
       .all();
     const paidIds = [...new Set(paidRows.map((r) => r.expenseId))];
     conditions.push(
-      paidIds.length > 0 ? inArray(expenses.id, paidIds) : eq(expenses.id, "__none__")
+      paidIds.length > 0
+        ? inArray(expenses.id, paidIds)
+        : eq(expenses.id, "__none__")
     );
   }
 
-  const active = await db
-    .select()
-    .from(expenses)
-    .where(and(...conditions, isNull(expenses.deletedAt)))
-    .orderBy(desc(expenses.date))
-    .all();
+  const [active, totalRow, deleted] = await Promise.all([
+    db
+      .select()
+      .from(expenses)
+      .where(and(...conditions, isNull(expenses.deletedAt)))
+      .orderBy(desc(expenses.date))
+      .limit(PAGE_SIZE)
+      .offset(offset)
+      .all(),
+    db
+      .select({ value: sql<number>`count(*)`.mapWith(Number) })
+      .from(expenses)
+      .where(and(...conditions, isNull(expenses.deletedAt)))
+      .get(),
+    db
+      .select()
+      .from(expenses)
+      .where(and(eq(expenses.groupId, id), isNotNull(expenses.deletedAt)))
+      .orderBy(desc(expenses.deletedAt))
+      .limit(10)
+      .all(),
+  ]);
+
+  const total = totalRow?.value ?? 0;
+  const hasMore = offset + PAGE_SIZE < total;
 
   const payerRows =
     active.length === 0
@@ -107,15 +145,15 @@ export default async function GroupPage({
     payersByExpense.set(p.expenseId, list);
   }
 
-  const deleted = await db
-    .select()
-    .from(expenses)
-    .where(and(eq(expenses.groupId, id), isNotNull(expenses.deletedAt)))
-    .orderBy(desc(expenses.deletedAt))
-    .limit(10)
-    .all();
-
-  const { settlements } = await getGroupExpenseBundle(id);
+  function pageHref(nextPage: number) {
+    const params = new URLSearchParams();
+    if (sp.q) params.set("q", sp.q);
+    if (sp.category) params.set("category", sp.category);
+    if (sp.addedBy) params.set("addedBy", sp.addedBy);
+    if (sp.paidBy) params.set("paidBy", sp.paidBy);
+    params.set("page", String(nextPage));
+    return `/groups/${id}?${params.toString()}`;
+  }
 
   return (
     <div className="space-y-6">
@@ -178,6 +216,9 @@ export default async function GroupPage({
               <li key={m.userId} className="flex items-center gap-2 text-sm">
                 <AvatarDisplay avatarId={m.avatarId} name={m.name} size={28} />
                 <span className="font-medium">{m.name}</span>
+                {m.role === "OWNER" && (
+                  <span className="text-xs text-muted">owner</span>
+                )}
               </li>
             ))}
           </ul>
@@ -301,6 +342,24 @@ export default async function GroupPage({
             ))}
           </ul>
         )}
+        {(page > 1 || hasMore) && (
+          <div className="flex gap-2 border-t border-border px-5 py-3">
+            {page > 1 && (
+              <Link href={pageHref(page - 1)}>
+                <Button variant="secondary" size="sm">
+                  Previous
+                </Button>
+              </Link>
+            )}
+            {hasMore && (
+              <Link href={pageHref(page + 1)}>
+                <Button variant="secondary" size="sm">
+                  Next
+                </Button>
+              </Link>
+            )}
+          </div>
+        )}
       </Card>
 
       <Card>
@@ -339,12 +398,14 @@ export default async function GroupPage({
             {deleted.map((e) => (
               <li key={e.id} className="flex justify-between gap-2">
                 <span className="text-muted">{e.description}</span>
-                <Link
-                  className="font-medium text-accent"
-                  href={`/groups/${id}/expenses/${e.id}`}
-                >
-                  Restore
-                </Link>
+                {e.createdById === session.user.id && (
+                  <Link
+                    className="font-medium text-accent"
+                    href={`/groups/${id}/expenses/${e.id}`}
+                  >
+                    Restore
+                  </Link>
+                )}
               </li>
             ))}
           </ul>

@@ -32,9 +32,11 @@ const statements = [
     id TEXT PRIMARY KEY,
     group_id TEXT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
     user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    role TEXT NOT NULL DEFAULT 'MEMBER',
     joined_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
   )`,
   `CREATE UNIQUE INDEX IF NOT EXISTS group_members_unique ON group_members(group_id, user_id)`,
+  `CREATE INDEX IF NOT EXISTS group_members_user_idx ON group_members(user_id)`,
   `CREATE TABLE IF NOT EXISTS group_invites (
     id TEXT PRIMARY KEY,
     group_id TEXT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
@@ -62,6 +64,8 @@ const statements = [
     created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
   )`,
   `CREATE UNIQUE INDEX IF NOT EXISTS friendships_unique ON friendships(user_a_id, user_b_id)`,
+  `CREATE INDEX IF NOT EXISTS friendships_user_a_idx ON friendships(user_a_id)`,
+  `CREATE INDEX IF NOT EXISTS friendships_user_b_status_idx ON friendships(user_b_id, status)`,
   `CREATE TABLE IF NOT EXISTS recurring_expenses (
     id TEXT PRIMARY KEY,
     group_id TEXT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
@@ -99,6 +103,7 @@ const statements = [
   )`,
   `CREATE INDEX IF NOT EXISTS expenses_group_idx ON expenses(group_id)`,
   `CREATE INDEX IF NOT EXISTS expenses_friendship_idx ON expenses(friendship_id)`,
+  `CREATE INDEX IF NOT EXISTS expenses_group_active_date_idx ON expenses(group_id, deleted_at, date)`,
   `CREATE TABLE IF NOT EXISTS expense_splits (
     id TEXT PRIMARY KEY,
     expense_id TEXT NOT NULL REFERENCES expenses(id) ON DELETE CASCADE,
@@ -108,6 +113,7 @@ const statements = [
     percent REAL
   )`,
   `CREATE UNIQUE INDEX IF NOT EXISTS expense_splits_unique ON expense_splits(expense_id, user_id)`,
+  `CREATE INDEX IF NOT EXISTS expense_splits_expense_idx ON expense_splits(expense_id)`,
   `CREATE TABLE IF NOT EXISTS expense_payers (
     id TEXT PRIMARY KEY,
     expense_id TEXT NOT NULL REFERENCES expenses(id) ON DELETE CASCADE,
@@ -115,6 +121,8 @@ const statements = [
     amount REAL NOT NULL
   )`,
   `CREATE UNIQUE INDEX IF NOT EXISTS expense_payers_unique ON expense_payers(expense_id, user_id)`,
+  `CREATE INDEX IF NOT EXISTS expense_payers_expense_idx ON expense_payers(expense_id)`,
+  `CREATE INDEX IF NOT EXISTS expense_payers_user_idx ON expense_payers(user_id)`,
   `CREATE TABLE IF NOT EXISTS expense_comments (
     id TEXT PRIMARY KEY,
     expense_id TEXT NOT NULL REFERENCES expenses(id) ON DELETE CASCADE,
@@ -122,6 +130,7 @@ const statements = [
     body TEXT NOT NULL,
     created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
   )`,
+  `CREATE INDEX IF NOT EXISTS expense_comments_expense_idx ON expense_comments(expense_id)`,
   `CREATE TABLE IF NOT EXISTS expense_history (
     id TEXT PRIMARY KEY,
     expense_id TEXT NOT NULL REFERENCES expenses(id) ON DELETE CASCADE,
@@ -130,6 +139,7 @@ const statements = [
     snapshot TEXT NOT NULL,
     created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
   )`,
+  `CREATE INDEX IF NOT EXISTS expense_history_expense_idx ON expense_history(expense_id)`,
   `CREATE TABLE IF NOT EXISTS settlements (
     id TEXT PRIMARY KEY,
     group_id TEXT REFERENCES groups(id) ON DELETE CASCADE,
@@ -142,6 +152,7 @@ const statements = [
     deleted_at INTEGER,
     created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
   )`,
+  `CREATE INDEX IF NOT EXISTS settlements_group_idx ON settlements(group_id, deleted_at)`,
   `CREATE TABLE IF NOT EXISTS notifications (
     id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -154,6 +165,7 @@ const statements = [
     created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
   )`,
   `CREATE INDEX IF NOT EXISTS notifications_user_idx ON notifications(user_id)`,
+  `CREATE INDEX IF NOT EXISTS notifications_user_created_idx ON notifications(user_id, created_at)`,
   `CREATE TABLE IF NOT EXISTS activity_events (
     id TEXT PRIMARY KEY,
     group_id TEXT REFERENCES groups(id) ON DELETE CASCADE,
@@ -164,6 +176,14 @@ const statements = [
     created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
   )`,
   `CREATE INDEX IF NOT EXISTS activity_group_idx ON activity_events(group_id)`,
+  `CREATE INDEX IF NOT EXISTS activity_user_created_idx ON activity_events(user_id, created_at)`,
+  `CREATE TABLE IF NOT EXISTS rate_limits (
+    id TEXT PRIMARY KEY,
+    key TEXT NOT NULL UNIQUE,
+    count INTEGER NOT NULL DEFAULT 0,
+    window_start INTEGER NOT NULL
+  )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS rate_limits_key_unique ON rate_limits(key)`,
   `CREATE TABLE IF NOT EXISTS ious (
     id TEXT PRIMARY KEY,
     group_id TEXT REFERENCES groups(id) ON DELETE CASCADE,
@@ -215,11 +235,34 @@ export async function migrate() {
   for (const alter of [
     `ALTER TABLE friendships ADD COLUMN status TEXT NOT NULL DEFAULT 'ACCEPTED'`,
     `ALTER TABLE friendships ADD COLUMN requested_by TEXT`,
+    `ALTER TABLE group_members ADD COLUMN role TEXT NOT NULL DEFAULT 'MEMBER'`,
   ]) {
     try {
       await client.execute(alter);
     } catch {
       // column already exists
     }
+  }
+
+  // Promote earliest member per group to OWNER when role is missing/MEMBER-only
+  try {
+    await client.execute(`
+      UPDATE group_members
+      SET role = 'OWNER'
+      WHERE id IN (
+        SELECT gm.id FROM group_members gm
+        INNER JOIN (
+          SELECT group_id, MIN(joined_at) AS min_joined
+          FROM group_members
+          GROUP BY group_id
+        ) first ON first.group_id = gm.group_id AND first.min_joined = gm.joined_at
+        WHERE NOT EXISTS (
+          SELECT 1 FROM group_members o
+          WHERE o.group_id = gm.group_id AND o.role = 'OWNER'
+        )
+      )
+    `);
+  } catch {
+    // best-effort backfill
   }
 }

@@ -1,6 +1,6 @@
 "use server";
 
-import { and, eq, isNull, or } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { auth } from "@/auth";
@@ -146,10 +146,10 @@ export async function rejectFriendRequestAction(friendshipId: string) {
     throw new Error("You cannot reject your own request");
   }
 
-  await db.update(friendships)
+  await db
+    .update(friendships)
     .set({ deletedAt: new Date(), status: "DECLINED" })
-    .where(eq(friendships.id, friendshipId))
-    ;
+    .where(eq(friendships.id, friendshipId));
 
   if (friendship.requestedBy) {
     await createNotification({
@@ -162,18 +162,4 @@ export async function rejectFriendRequestAction(friendshipId: string) {
 
   revalidatePath("/friends");
   revalidatePath("/dashboard");
-}
-
-export async function getMyFriendships(userId: string) {
-  return await db
-    .select()
-    .from(friendships)
-    .where(
-      and(
-        isNull(friendships.deletedAt),
-        eq(friendships.status, "ACCEPTED"),
-        or(eq(friendships.userAId, userId), eq(friendships.userBId, userId))
-      )
-    )
-    .all();
 }

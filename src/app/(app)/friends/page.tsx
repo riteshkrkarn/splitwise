@@ -1,4 +1,5 @@
-import { and, eq, isNull, or } from "drizzle-orm";
+import { redirect } from "next/navigation";
+import { and, eq, inArray, isNull, or } from "drizzle-orm";
 import { auth } from "@/auth";
 import FriendsClient from "./friends-client";
 import { db } from "@/db";
@@ -8,23 +9,22 @@ import { Card } from "@/components/ui/card";
 
 export default async function FriendsPage() {
   const session = await auth();
-  if (!session?.user?.id) return null;
+  if (!session?.user?.id) redirect("/login");
   const userId = session.user.id;
 
-  const accepted = await db
-    .select()
-    .from(friendships)
-    .where(
-      and(
-        isNull(friendships.deletedAt),
-        eq(friendships.status, "ACCEPTED"),
-        or(eq(friendships.userAId, userId), eq(friendships.userBId, userId))
+  const [accepted, pendingAll] = await Promise.all([
+    db
+      .select()
+      .from(friendships)
+      .where(
+        and(
+          isNull(friendships.deletedAt),
+          eq(friendships.status, "ACCEPTED"),
+          or(eq(friendships.userAId, userId), eq(friendships.userBId, userId))
+        )
       )
-    )
-    .all();
-
-  const pendingIncoming = (
-    await db
+      .all(),
+    db
       .select()
       .from(friendships)
       .where(
@@ -34,41 +34,43 @@ export default async function FriendsPage() {
           or(eq(friendships.userAId, userId), eq(friendships.userBId, userId))
         )
       )
-      .all()
-  ).filter((f) => f.requestedBy !== userId);
+      .all(),
+  ]);
 
-  const friends = await Promise.all(
-    accepted.map(async (f) => {
-      const otherId = f.userAId === userId ? f.userBId : f.userAId;
-      const other = (await db
-        .select()
-        .from(users)
-        .where(eq(users.id, otherId))
-        .get())!;
-      return {
-        id: f.id,
-        name: other.name,
-        email: other.email,
-        avatarId: other.avatarId,
-      };
-    })
-  );
+  const pendingIncoming = pendingAll.filter((f) => f.requestedBy !== userId);
+  const otherIds = [
+    ...new Set(
+      [...accepted, ...pendingIncoming].map((f) =>
+        f.userAId === userId ? f.userBId : f.userAId
+      )
+    ),
+  ];
+  const otherUsers =
+    otherIds.length === 0
+      ? []
+      : await db.select().from(users).where(inArray(users.id, otherIds)).all();
+  const userById = Object.fromEntries(otherUsers.map((u) => [u.id, u]));
 
-  const requests = await Promise.all(
-    pendingIncoming.map(async (f) => {
-      const otherId = f.userAId === userId ? f.userBId : f.userAId;
-      const other = (await db
-        .select()
-        .from(users)
-        .where(eq(users.id, otherId))
-        .get())!;
-      return {
-        id: f.id,
-        name: other.name,
-        email: other.email,
-      };
-    })
-  );
+  const friends = accepted.map((f) => {
+    const otherId = f.userAId === userId ? f.userBId : f.userAId;
+    const other = userById[otherId];
+    return {
+      id: f.id,
+      name: other?.name ?? "Unknown",
+      email: other?.email ?? "",
+      avatarId: other?.avatarId ?? 1,
+    };
+  });
+
+  const requests = pendingIncoming.map((f) => {
+    const otherId = f.userAId === userId ? f.userBId : f.userAId;
+    const other = userById[otherId];
+    return {
+      id: f.id,
+      name: other?.name ?? "Unknown",
+      email: other?.email ?? "",
+    };
+  });
 
   return (
     <div className="space-y-6">

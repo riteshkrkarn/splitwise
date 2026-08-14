@@ -9,10 +9,25 @@ const protectedPrefixes = [
   "/analytics",
 ];
 
+const isProd = process.env.NODE_ENV === "production";
+
 export const authConfig = {
   trustHost: true,
   secret: process.env.AUTH_SECRET,
-  session: { strategy: "jwt" },
+  session: {
+    strategy: "jwt",
+    maxAge: 7 * 24 * 60 * 60,
+  },
+  cookies: {
+    sessionToken: {
+      options: {
+        httpOnly: true,
+        sameSite: "lax",
+        path: "/",
+        secure: isProd,
+      },
+    },
+  },
   pages: {
     signIn: "/login",
   },

@@ -1,6 +1,7 @@
 "use client";
 
 import { useActionState, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { createSettlementAction } from "@/actions/settlements";
 import type { ActionResult } from "@/actions/auth";
 import { Button } from "@/components/ui/button";
@@ -54,12 +55,14 @@ export function BalanceList({
   currentUserId,
   memberIds,
   groupId,
+  friendshipId,
 }: {
   summaries: BalanceSummary[];
   nameById: Record<string, string>;
   currentUserId?: string;
   memberIds?: string[];
   groupId?: string;
+  friendshipId?: string;
 }) {
   if (summaries.length === 0) {
     return (
@@ -70,7 +73,7 @@ export function BalanceList({
   return (
     <div className="space-y-5">
       {summaries.map((s) => {
-        const pairwise = s.pairwiseDebts ?? s.debts;
+        const pairwise = s.debts;
         const ids =
           memberIds && memberIds.length > 0
             ? memberIds
@@ -150,6 +153,7 @@ export function BalanceList({
                       currency={s.currency}
                       nameById={nameById}
                       groupId={groupId}
+                      friendshipId={friendshipId}
                       currentUserId={currentUserId}
                     />
                   </li>
@@ -168,12 +172,14 @@ function PairRow({
   currency,
   nameById,
   groupId,
+  friendshipId,
   currentUserId,
 }: {
   pair: PairRow;
   currency: string;
   nameById: Record<string, string>;
   groupId?: string;
+  friendshipId?: string;
   currentUserId?: string;
 }) {
   const [paying, setPaying] = useState(false);
@@ -186,6 +192,7 @@ function PairRow({
   const settled = pair.amount < 0.01 || !pair.fromUserId || !pair.toUserId;
   const iOwe = Boolean(currentUserId && pair.fromUserId === currentUserId);
   const theyOwe = Boolean(currentUserId && pair.toUserId === currentUserId);
+  const canPay = Boolean(groupId && iOwe);
 
   return (
     <div className="space-y-2">
@@ -208,7 +215,7 @@ function PairRow({
             <p className="mt-0.5 text-sm text-muted">Settled</p>
           )}
         </div>
-        {groupId && iOwe && !paying && (
+        {canPay && !paying && (
           <Button
             type="button"
             variant="secondary"
@@ -219,7 +226,7 @@ function PairRow({
           </Button>
         )}
       </div>
-      {groupId && iOwe && paying && pair.fromUserId && pair.toUserId && (
+      {canPay && paying && pair.fromUserId && pair.toUserId && groupId && (
         <PayControl
           groupId={groupId}
           fromUserId={pair.fromUserId}
@@ -228,6 +235,11 @@ function PairRow({
           currency={currency}
           onCancel={() => setPaying(false)}
         />
+      )}
+      {friendshipId && iOwe && !groupId && (
+        <p className="text-xs text-muted">
+          Record settlements from shared groups, or add an expense to adjust.
+        </p>
       )}
     </div>
   );
@@ -248,6 +260,7 @@ function PayControl({
   currency: string;
   onCancel: () => void;
 }) {
+  const router = useRouter();
   const bound = createSettlementAction.bind(null, groupId);
   const [state, action, pending] = useActionState<ActionResult, FormData>(
     bound,
@@ -255,8 +268,11 @@ function PayControl({
   );
 
   useEffect(() => {
-    if (state.success) onCancel();
-  }, [state.success, onCancel]);
+    if (state.success) {
+      onCancel();
+      router.refresh();
+    }
+  }, [state.success, onCancel, router]);
 
   return (
     <form action={action} className="space-y-2 rounded-lg bg-surface p-3">

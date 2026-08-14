@@ -3,10 +3,10 @@ import { eq } from "drizzle-orm";
 import { auth } from "@/auth";
 import { ExpenseForm } from "@/components/expense-form";
 import { db } from "@/db";
-import { expensePayers, expenseSplits, expenses } from "@/db/schema";
-import { assertGroupMember, getGroupMembers } from "@/lib/group-data";
+import { expensePayers, expenseSplits, expenses, users } from "@/db/schema";
+import { assertFriendshipMember } from "@/lib/group-data";
 
-export default async function EditExpensePage({
+export default async function EditFriendExpensePage({
   params,
 }: {
   params: Promise<{ id: string; expenseId: string }>;
@@ -14,8 +14,10 @@ export default async function EditExpensePage({
   const { id, expenseId } = await params;
   const session = await auth();
   if (!session?.user?.id) redirect("/login");
+
+  let friendship;
   try {
-    await assertGroupMember(id, session.user.id);
+    friendship = await assertFriendshipMember(id, session.user.id);
   } catch {
     notFound();
   }
@@ -25,11 +27,12 @@ export default async function EditExpensePage({
     .from(expenses)
     .where(eq(expenses.id, expenseId))
     .get();
-  if (!expense || expense.groupId !== id || expense.deletedAt) notFound();
+  if (!expense || expense.friendshipId !== id || expense.deletedAt) notFound();
   if (expense.createdById !== session.user.id) notFound();
 
-  const [members, splits, payers] = await Promise.all([
-    getGroupMembers(id),
+  const [userA, userB, splits, payers] = await Promise.all([
+    db.select().from(users).where(eq(users.id, friendship.userAId)).get(),
+    db.select().from(users).where(eq(users.id, friendship.userBId)).get(),
     db
       .select()
       .from(expenseSplits)
@@ -42,10 +45,14 @@ export default async function EditExpensePage({
       .all(),
   ]);
 
+  const members = [userA, userB]
+    .filter(Boolean)
+    .map((u) => ({ userId: u!.id, name: u!.name }));
+
   return (
     <ExpenseForm
-      groupId={id}
-      friendshipId={null}
+      groupId={null}
+      friendshipId={id}
       members={members}
       defaultCurrency={expense.currency}
       defaultSplitMode={expense.splitMode}

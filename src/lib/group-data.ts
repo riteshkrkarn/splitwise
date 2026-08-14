@@ -1,12 +1,13 @@
-import { and, eq, isNull } from "drizzle-orm";
+import { cache } from "react";
+import { and, desc, eq, inArray, isNull, or } from "drizzle-orm";
 import { db } from "@/db";
-import { migrate } from "@/db/ensure-migrated";
 import {
   activityEvents,
   defaultSplits,
   expensePayers,
   expenseSplits,
   expenses,
+  friendships,
   groupInvites,
   groupMembers,
   groups,
@@ -22,13 +23,27 @@ import {
 } from "@/lib/balances";
 import { createId } from "@/lib/id";
 
+const SQLITE_IN_CHUNK = 500;
+
+async function selectByIds<T>(
+  ids: string[],
+  query: (chunk: string[]) => Promise<T[]>
+): Promise<T[]> {
+  if (ids.length === 0) return [];
+  const results: T[] = [];
+  for (let i = 0; i < ids.length; i += SQLITE_IN_CHUNK) {
+    const chunk = ids.slice(i, i + SQLITE_IN_CHUNK);
+    results.push(...(await query(chunk)));
+  }
+  return results;
+}
+
 export async function requireUserId(userId: string | undefined) {
   if (!userId) throw new Error("Unauthorized");
   return userId;
 }
 
-export async function getGroupOrThrow(groupId: string) {
-  await migrate();
+export const getGroupOrThrow = cache(async (groupId: string) => {
   const group = await db
     .select()
     .from(groups)
@@ -36,23 +51,48 @@ export async function getGroupOrThrow(groupId: string) {
     .get();
   if (!group || group.deletedAt) throw new Error("Group not found");
   return group;
-}
+});
 
-export async function assertGroupMember(groupId: string, userId: string) {
-  await migrate();
-  const member = await db
-    .select()
-    .from(groupMembers)
-    .where(
-      and(eq(groupMembers.groupId, groupId), eq(groupMembers.userId, userId))
-    )
-    .get();
-  if (!member) throw new Error("Not a group member");
+export const assertGroupMember = cache(
+  async (groupId: string, userId: string) => {
+    const member = await db
+      .select()
+      .from(groupMembers)
+      .where(
+        and(eq(groupMembers.groupId, groupId), eq(groupMembers.userId, userId))
+      )
+      .get();
+    if (!member) throw new Error("Not a group member");
+    return member;
+  }
+);
+
+export async function assertGroupOwner(groupId: string, userId: string) {
+  const member = await assertGroupMember(groupId, userId);
+  if (member.role !== "OWNER") throw new Error("Only the group owner can do that");
   return member;
 }
 
-export async function getGroupMembers(groupId: string) {
-  await migrate();
+export const assertFriendshipMember = cache(
+  async (friendshipId: string, userId: string) => {
+    const friendship = await db
+      .select()
+      .from(friendships)
+      .where(
+        and(
+          eq(friendships.id, friendshipId),
+          isNull(friendships.deletedAt),
+          eq(friendships.status, "ACCEPTED"),
+          or(eq(friendships.userAId, userId), eq(friendships.userBId, userId))
+        )
+      )
+      .get();
+    if (!friendship) throw new Error("Not a friendship member");
+    return friendship;
+  }
+);
+
+export const getGroupMembers = cache(async (groupId: string) => {
   return db
     .select({
       id: groupMembers.id,
@@ -60,16 +100,16 @@ export async function getGroupMembers(groupId: string) {
       name: users.name,
       email: users.email,
       avatarId: users.avatarId,
+      role: groupMembers.role,
       joinedAt: groupMembers.joinedAt,
     })
     .from(groupMembers)
     .innerJoin(users, eq(users.id, groupMembers.userId))
     .where(eq(groupMembers.groupId, groupId))
     .all();
-}
+});
 
-export async function getGroupExpenseBundle(groupId: string) {
-  await migrate();
+export const getGroupExpenseBundle = cache(async (groupId: string) => {
   const activeExpenses = await db
     .select()
     .from(expenses)
@@ -77,24 +117,27 @@ export async function getGroupExpenseBundle(groupId: string) {
     .all();
 
   const expenseIds = activeExpenses.map((e) => e.id);
-  const allSplits =
-    expenseIds.length === 0
-      ? []
-      : (await db.select().from(expenseSplits).all()).filter((s) =>
-          expenseIds.includes(s.expenseId)
-        );
-  const allPayers =
-    expenseIds.length === 0
-      ? []
-      : (await db.select().from(expensePayers).all()).filter((p) =>
-          expenseIds.includes(p.expenseId)
-        );
-
-  const activeSettlements = await db
-    .select()
-    .from(settlements)
-    .where(and(eq(settlements.groupId, groupId), isNull(settlements.deletedAt)))
-    .all();
+  const [allSplits, allPayers, activeSettlements] = await Promise.all([
+    selectByIds(expenseIds, (chunk) =>
+      db
+        .select()
+        .from(expenseSplits)
+        .where(inArray(expenseSplits.expenseId, chunk))
+        .all()
+    ),
+    selectByIds(expenseIds, (chunk) =>
+      db
+        .select()
+        .from(expensePayers)
+        .where(inArray(expensePayers.expenseId, chunk))
+        .all()
+    ),
+    db
+      .select()
+      .from(settlements)
+      .where(and(eq(settlements.groupId, groupId), isNull(settlements.deletedAt)))
+      .all(),
+  ]);
 
   const expensePayload = activeExpenses.map((e) => ({
     currency: e.currency,
@@ -119,21 +162,63 @@ export async function getGroupExpenseBundle(groupId: string) {
     }>,
     expensePayload,
   };
-}
+});
 
-export async function getGroupBalances(groupId: string): Promise<BalanceSummary[]> {
-  const group = await getGroupOrThrow(groupId);
-  const { expensePayload, settlements } = await getGroupExpenseBundle(groupId);
-  const settlementRows = settlements.map((s) => ({
-    fromUserId: s.fromUserId,
-    toUserId: s.toUserId,
-    amount: s.amount,
-    currency: s.currency,
-  }));
-  const net = computeNetBalances(expensePayload, settlementRows, []);
-  const pairwise = computePairwiseDebts(expensePayload, settlementRows, []);
-  return summarizeBalances(net, group.simplifyDebts, pairwise);
-}
+export const getGroupBalances = cache(
+  async (groupId: string): Promise<BalanceSummary[]> => {
+    const group = await getGroupOrThrow(groupId);
+    const { expensePayload, settlements } = await getGroupExpenseBundle(groupId);
+    const settlementRows = settlements.map((s) => ({
+      fromUserId: s.fromUserId,
+      toUserId: s.toUserId,
+      amount: s.amount,
+      currency: s.currency,
+    }));
+    const net = computeNetBalances(expensePayload, settlementRows, []);
+    const pairwise = computePairwiseDebts(expensePayload, settlementRows, []);
+    return summarizeBalances(net, group.simplifyDebts, pairwise);
+  }
+);
+
+export const getNotificationsForUser = cache(async (userId: string) => {
+  return db
+    .select()
+    .from(notifications)
+    .where(eq(notifications.userId, userId))
+    .orderBy(desc(notifications.createdAt))
+    .limit(12)
+    .all();
+});
+
+export const getPendingInviteIdsForEmail = cache(async (email: string) => {
+  return (
+    await db
+      .select({ id: groupInvites.id })
+      .from(groupInvites)
+      .where(
+        and(eq(groupInvites.email, email), eq(groupInvites.status, "PENDING"))
+      )
+      .all()
+  ).map((i) => i.id);
+});
+
+export const getPendingFriendIdsForUser = cache(async (userId: string) => {
+  return (
+    await db
+      .select()
+      .from(friendships)
+      .where(
+        and(
+          isNull(friendships.deletedAt),
+          eq(friendships.status, "PENDING"),
+          or(eq(friendships.userAId, userId), eq(friendships.userBId, userId))
+        )
+      )
+      .all()
+  )
+    .filter((f) => f.requestedBy !== userId)
+    .map((f) => f.id);
+});
 
 export async function createNotification(input: {
   userId: string;
@@ -143,7 +228,6 @@ export async function createNotification(input: {
   body: string;
   href?: string;
 }) {
-  await migrate();
   await db.insert(notifications).values({
     id: createId("ntf"),
     userId: input.userId,
@@ -164,7 +248,6 @@ export async function createActivity(input: {
   message: string;
   meta?: unknown;
 }) {
-  await migrate();
   await db.insert(activityEvents).values({
     id: createId("act"),
     userId: input.userId,
@@ -177,7 +260,6 @@ export async function createActivity(input: {
 }
 
 export async function getDefaultSplits(groupId: string) {
-  await migrate();
   return db
     .select()
     .from(defaultSplits)
@@ -186,7 +268,6 @@ export async function getDefaultSplits(groupId: string) {
 }
 
 export async function getPendingInvites(groupId: string) {
-  await migrate();
   return db
     .select()
     .from(groupInvites)
@@ -195,3 +276,5 @@ export async function getPendingInvites(groupId: string) {
     )
     .all();
 }
+
+export { selectByIds };

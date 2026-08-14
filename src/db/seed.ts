@@ -14,6 +14,9 @@ import { createId } from "@/lib/id";
 import { computeSplits } from "@/lib/split-validator";
 
 async function seed() {
+  if (process.env.NODE_ENV === "production") {
+    throw new Error("Refusing to seed in production.");
+  }
   await migrate();
   const passwordHash = await bcrypt.hash("password123", 10);
 
@@ -73,12 +76,14 @@ async function seed() {
         id: createId("gmem"),
         groupId,
         userId: rahulId,
+        role: "OWNER",
         joinedAt: new Date(),
       },
       {
         id: createId("gmem"),
         groupId,
         userId: priyaId,
+        role: "MEMBER",
         joinedAt: new Date(),
       },
     ])

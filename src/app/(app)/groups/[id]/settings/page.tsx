@@ -1,4 +1,4 @@
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { auth } from "@/auth";
 import { SettingsClient } from "./settings-client";
 import {
@@ -15,7 +15,7 @@ export default async function SettingsPage({
 }) {
   const { id } = await params;
   const session = await auth();
-  if (!session?.user?.id) return null;
+  if (!session?.user?.id) redirect("/login");
   try {
     await assertGroupMember(id, session.user.id);
   } catch {
@@ -24,6 +24,7 @@ export default async function SettingsPage({
   const group = await getGroupOrThrow(id);
   const members = await getGroupMembers(id);
   const defaults = await getDefaultSplits(id);
+  const me = members.find((m) => m.userId === session.user.id);
   return (
     <SettingsClient
       groupId={id}
@@ -34,6 +35,8 @@ export default async function SettingsPage({
       defaultSplitMode={group.defaultSplitMode}
       members={members}
       defaultSplitValues={Object.fromEntries(defaults.map((d) => [d.userId, d.value]))}
+      isOwner={me?.role === "OWNER"}
+      currentUserId={session.user.id}
     />
   );
 }

@@ -1,12 +1,15 @@
 import Link from "next/link";
-import { and, desc, eq, isNull, or } from "drizzle-orm";
+import { Suspense } from "react";
 import { auth } from "@/auth";
 import { logoutAction } from "@/actions/auth";
 import { AvatarDisplay } from "@/components/avatar-display";
 import { NavbarControls } from "@/components/navbar-controls";
 import { Button } from "@/components/ui/button";
-import { db } from "@/db";
-import { friendships, groupInvites, notifications } from "@/db/schema";
+import {
+  getNotificationsForUser,
+  getPendingFriendIdsForUser,
+  getPendingInviteIdsForEmail,
+} from "@/lib/group-data";
 
 const nav = [
   { href: "/dashboard", label: "Home" },
@@ -16,54 +19,49 @@ const nav = [
   { href: "/profile", label: "Profile" },
 ] as const;
 
-export async function AppShell({ children }: { children: React.ReactNode }) {
-  const session = await auth();
-  const userId = session?.user?.id;
-
-  const notes = userId
-    ? await db
-        .select()
-        .from(notifications)
-        .where(eq(notifications.userId, userId))
-        .orderBy(desc(notifications.createdAt))
-        .limit(12)
-        .all()
-    : [];
-
+async function NavbarData({
+  userId,
+  email,
+}: {
+  userId: string;
+  email: string;
+}) {
+  const [notes, pendingGroupInviteIds, pendingFriendIds] = await Promise.all([
+    getNotificationsForUser(userId),
+    getPendingInviteIdsForEmail(email),
+    getPendingFriendIdsForUser(userId),
+  ]);
   const unreadCount = notes.filter((n) => !n.read).length;
 
-  const pendingGroupInviteIds = userId
-    ? (
-        await db
-          .select()
-          .from(groupInvites)
-          .where(
-            and(
-              eq(groupInvites.email, session!.user.email),
-              eq(groupInvites.status, "PENDING")
-            )
-          )
-          .all()
-      ).map((i) => i.id)
-    : [];
+  return (
+    <NavbarControls
+      notifications={notes.map((n) => ({
+        id: n.id,
+        type: n.type,
+        title: n.title,
+        body: n.body,
+        href: n.href,
+        read: n.read,
+        createdAt: n.createdAt,
+      }))}
+      unreadCount={unreadCount}
+      pendingGroupInviteIds={pendingGroupInviteIds}
+      pendingFriendIds={pendingFriendIds}
+    />
+  );
+}
 
-  const pendingFriendIds = userId
-    ? (
-        await db
-          .select()
-          .from(friendships)
-          .where(
-            and(
-              isNull(friendships.deletedAt),
-              eq(friendships.status, "PENDING"),
-              or(eq(friendships.userAId, userId), eq(friendships.userBId, userId))
-            )
-          )
-          .all()
-      )
-        .filter((f) => f.requestedBy !== userId)
-        .map((f) => f.id)
-    : [];
+function NavbarSkeleton() {
+  return (
+    <div
+      className="h-9 w-9 animate-pulse rounded-full bg-surface"
+      aria-hidden
+    />
+  );
+}
+
+export async function AppShell({ children }: { children: React.ReactNode }) {
+  const session = await auth();
 
   return (
     <div className="min-h-screen bg-bg text-ink">
@@ -94,20 +92,12 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
           <div className="ml-auto flex items-center gap-1 sm:gap-2">
             {session?.user && (
               <>
-                <NavbarControls
-                  notifications={notes.map((n) => ({
-                    id: n.id,
-                    type: n.type,
-                    title: n.title,
-                    body: n.body,
-                    href: n.href,
-                    read: n.read,
-                    createdAt: n.createdAt,
-                  }))}
-                  unreadCount={unreadCount}
-                  pendingGroupInviteIds={pendingGroupInviteIds}
-                  pendingFriendIds={pendingFriendIds}
-                />
+                <Suspense fallback={<NavbarSkeleton />}>
+                  <NavbarData
+                    userId={session.user.id}
+                    email={session.user.email}
+                  />
+                </Suspense>
                 <Link
                   href="/profile"
                   className="rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"

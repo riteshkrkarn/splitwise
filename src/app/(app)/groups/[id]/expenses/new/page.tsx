@@ -1,4 +1,4 @@
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { auth } from "@/auth";
 import { ExpenseForm } from "@/components/expense-form";
 import {
@@ -15,7 +15,7 @@ export default async function NewExpensePage({
 }) {
   const { id } = await params;
   const session = await auth();
-  if (!session?.user?.id) return null;
+  if (!session?.user?.id) redirect("/login");
   try {
     await assertGroupMember(id, session.user.id);
   } catch {

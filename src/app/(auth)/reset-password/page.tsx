@@ -36,7 +36,7 @@ function ResetInner() {
           <input type="hidden" name="token" value={token} />
           <div>
             <Label htmlFor="password">New password</Label>
-            <PasswordInput id="password" name="password" minLength={6} required />
+            <PasswordInput id="password" name="password" minLength={10} maxLength={72} required />
           </div>
           {resetState.error && (
             <p className="text-sm text-danger">{resetState.error}</p>

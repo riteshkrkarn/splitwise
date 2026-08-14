@@ -27,10 +27,12 @@ export default function AnalyticsCharts({
   byCategory,
   byMonth,
   crossGroup,
+  currency,
 }: {
   byCategory: { name: string; total: number }[];
   byMonth: { name: string; total: number }[];
-  crossGroup: { name: string; net: number }[];
+  crossGroup: { name: string; net: number; currency: string; label: string }[];
+  currency: string;
 }) {
   const empty = byCategory.length === 0 && byMonth.length === 0;
 
@@ -38,7 +40,7 @@ export default function AnalyticsCharts({
     <div className="space-y-6">
       <PageHeader
         title="Insights"
-        description="Where shared money goes — by category and over time."
+        description={`Where shared money goes — amounts in ${currency}.`}
       />
       {empty ? (
         <EmptyState
@@ -49,7 +51,7 @@ export default function AnalyticsCharts({
         <div className="grid gap-4 md:grid-cols-2">
           <Card className="h-80">
             <h2 className="mb-3 text-sm font-semibold text-muted">
-              By category
+              By category ({currency})
             </h2>
             <ResponsiveContainer width="100%" height="85%">
               <PieChart>
@@ -70,7 +72,7 @@ export default function AnalyticsCharts({
           </Card>
           <Card className="h-80">
             <h2 className="mb-3 text-sm font-semibold text-muted">
-              Over time
+              Over time ({currency})
             </h2>
             <ResponsiveContainer width="100%" height="85%">
               <BarChart data={byMonth}>
@@ -86,7 +88,7 @@ export default function AnalyticsCharts({
       )}
       <Card>
         <h2 className="mb-3 text-sm font-semibold text-muted">
-          Across groups
+          Across groups ({currency})
         </h2>
         <ul className="space-y-2 text-sm">
           {crossGroup.length === 0 && (
@@ -101,7 +103,7 @@ export default function AnalyticsCharts({
                 }`}
               >
                 {c.net >= 0 ? "owes you " : "you owe "}
-                {Math.abs(c.net).toFixed(2)}
+                {c.label}
               </span>
             </li>
           ))}
