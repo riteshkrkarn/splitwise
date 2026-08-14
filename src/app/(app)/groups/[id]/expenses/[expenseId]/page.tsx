@@ -105,11 +105,13 @@ export default async function ExpenseDetailPage({
           <div className="flex gap-2">
             {!expense.deletedAt ? (
               <>
-                <Link href={`/groups/${id}/expenses/${expenseId}/edit`}>
-                  <Button type="button" variant="secondary" size="sm">
-                    Edit
-                  </Button>
-                </Link>
+                {expense.createdById === session.user.id && (
+                  <Link href={`/groups/${id}/expenses/${expenseId}/edit`}>
+                    <Button type="button" variant="secondary" size="sm">
+                      Edit
+                    </Button>
+                  </Link>
+                )}
                 <form action={softDeleteExpenseAction.bind(null, expenseId)}>
                   <Button type="submit" variant="danger" size="sm">
                     Delete

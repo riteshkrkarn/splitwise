@@ -289,11 +289,13 @@ export default async function GroupPage({
                   <p className="money shrink-0">
                     {formatMoney(e.amount, e.currency)}
                   </p>
-                  <Link href={`/groups/${id}/expenses/${e.id}/edit`}>
-                    <Button type="button" variant="ghost" size="sm">
-                      Edit
-                    </Button>
-                  </Link>
+                  {e.createdById === session.user.id && (
+                    <Link href={`/groups/${id}/expenses/${e.id}/edit`}>
+                      <Button type="button" variant="ghost" size="sm">
+                        Edit
+                      </Button>
+                    </Link>
+                  )}
                 </div>
               </li>
             ))}

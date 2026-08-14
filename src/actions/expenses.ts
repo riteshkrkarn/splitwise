@@ -231,6 +231,9 @@ export async function updateExpenseAction(
     .where(eq(expenses.id, expenseId))
     .get();
   if (!expense || expense.deletedAt) return { error: "Expense not found." };
+  if (expense.createdById !== session.user.id) {
+    return { error: "You can only edit expenses you added." };
+  }
   if (expense.groupId) await assertGroupMember(expense.groupId, session.user.id);
 
   const parsed = parseExpenseForm(formData, session.user.id);

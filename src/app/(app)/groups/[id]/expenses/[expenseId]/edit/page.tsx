@@ -26,6 +26,7 @@ export default async function EditExpensePage({
     .where(eq(expenses.id, expenseId))
     .get();
   if (!expense || expense.groupId !== id || expense.deletedAt) notFound();
+  if (expense.createdById !== session.user.id) notFound();
 
   const members = await getGroupMembers(id);
   const splits = await db
