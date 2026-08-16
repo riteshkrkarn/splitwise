@@ -20,12 +20,14 @@ export function CommentForm({ expenseId }: { expenseId: string }) {
   }, [state.success, router]);
 
   return (
-    <form action={action} className="flex gap-2">
-      <Input name="body" placeholder="Add a comment" required />
-      <Button type="submit" disabled={pending} size="sm">
+    <form action={action} className="flex flex-col gap-2 sm:flex-row">
+      <Input name="body" placeholder="Add a comment" required className="min-w-0 flex-1" />
+      <Button type="submit" disabled={pending} size="sm" className="shrink-0 sm:self-auto">
         Post
       </Button>
-      {state.error && <p className="text-xs text-danger">{state.error}</p>}
+      {state.error && (
+        <p className="text-xs text-danger sm:basis-full">{state.error}</p>
+      )}
     </form>
   );
 }
@@ -72,7 +74,10 @@ export function ReceiptForm({
       <div className="space-y-2">
         <p className="font-medium">Line items</p>
         {items.map((item, idx) => (
-          <div key={idx} className="grid grid-cols-3 gap-2">
+          <div
+            key={idx}
+            className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_7rem_minmax(0,9rem)]"
+          >
             <Input
               placeholder="Item"
               value={item.name}
@@ -86,6 +91,7 @@ export function ReceiptForm({
               placeholder="Price"
               type="number"
               step="0.01"
+              inputMode="decimal"
               value={item.price}
               onChange={(e) => {
                 const next = [...items];
@@ -94,13 +100,14 @@ export function ReceiptForm({
               }}
             />
             <select
-              className="h-11 rounded-xl border px-2"
+              className="h-11 min-w-0 rounded-xl border border-border bg-surface px-2 text-ink"
               value={item.assignedToUserId}
               onChange={(e) => {
                 const next = [...items];
                 next[idx] = { ...item, assignedToUserId: e.target.value };
                 setItems(next);
               }}
+              aria-label="Assigned to"
             >
               {members.map((m) => (
                 <option key={m.userId} value={m.userId}>

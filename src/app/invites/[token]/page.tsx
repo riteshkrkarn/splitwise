@@ -20,9 +20,9 @@ export default async function InvitePage({
 
   if (!session?.user) {
     return (
-      <div className="flex min-h-screen items-center justify-center px-4">
+      <div className="flex min-h-dvh items-center justify-center px-4 py-8">
         <Card className="w-full max-w-md space-y-4">
-          <h1 className="text-2xl font-bold text-ink">Group invite</h1>
+          <h1 className="page-title">Group invite</h1>
           <p className="text-sm text-muted">
             Log in to view and respond to this invite.
           </p>
@@ -45,7 +45,7 @@ export default async function InvitePage({
 
   if (!invite || !group) {
     return (
-      <div className="flex min-h-screen items-center justify-center px-4">
+      <div className="flex min-h-dvh items-center justify-center px-4 py-8">
         <Card>Invite not found.</Card>
       </div>
     );
@@ -53,9 +53,9 @@ export default async function InvitePage({
 
   if (session.user.email !== invite.email) {
     return (
-      <div className="flex min-h-screen items-center justify-center px-4">
+      <div className="flex min-h-dvh items-center justify-center px-4 py-8">
         <Card className="w-full max-w-md space-y-4">
-          <h1 className="text-2xl font-bold text-ink">Wrong account</h1>
+          <h1 className="page-title">Wrong account</h1>
           <p className="text-sm text-danger">
             This invite was sent to a different email. Log in with that account
             to respond.
@@ -66,9 +66,9 @@ export default async function InvitePage({
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-[radial-gradient(circle_at_top,#ccfbf1,#f7f6f2_50%)] px-4">
+    <div className="flex min-h-dvh items-center justify-center bg-[radial-gradient(circle_at_top,#ccfbf1,#f7f6f2_50%)] px-4 py-8 dark:bg-[radial-gradient(circle_at_top,oklch(0.28_0.06_180),var(--bg)_55%)]">
       <Card className="w-full max-w-md space-y-4">
-        <h1 className="text-2xl font-bold text-ink">Join {group.name}</h1>
+        <h1 className="page-title">Join {group.name}</h1>
         <p className="text-sm text-muted">
           You can also accept or reject this from Notifications on your
           dashboard.
@@ -78,7 +78,7 @@ export default async function InvitePage({
             This invite was already {invite.status.toLowerCase()}.
           </p>
         ) : (
-          <div className="flex gap-2">
+          <div className="flex flex-col gap-2 sm:flex-row">
             <form
               action={acceptInviteAction.bind(null, invite.id)}
               className="flex-1"

@@ -71,7 +71,13 @@ function ResetInner() {
 
 export default function ResetPasswordPage() {
   return (
-    <div className="flex min-h-screen items-center justify-center bg-bg px-4">
+    <div
+      className="flex min-h-dvh items-center justify-center bg-bg px-4 py-8"
+      style={{
+        paddingTop: "max(2rem, env(safe-area-inset-top))",
+        paddingBottom: "max(2rem, env(safe-area-inset-bottom))",
+      }}
+    >
       <Suspense>
         <ResetInner />
       </Suspense>

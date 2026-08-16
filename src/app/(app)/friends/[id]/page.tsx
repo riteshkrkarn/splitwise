@@ -1,11 +1,12 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { and, desc, eq, inArray, isNull } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { auth } from "@/auth";
 import { ExpenseForm } from "@/components/expense-form";
 import { BalanceList } from "@/components/balance-list";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { PaginationNav } from "@/components/pagination-nav";
 import { db } from "@/db";
 import {
   expensePayers,
@@ -20,9 +21,14 @@ import {
   summarizeBalances,
 } from "@/lib/balances";
 import { selectByIds } from "@/lib/group-data";
+import {
+  DEFAULT_PAGE_SIZE,
+  hasNextPage,
+  pageOffset,
+  parsePage,
+  withPageParam,
+} from "@/lib/pagination";
 import { formatMoney } from "@/lib/utils";
-
-const PAGE_SIZE = 25;
 
 export default async function FriendshipPage({
   params,
@@ -70,26 +76,41 @@ export default async function FriendshipPage({
     { userId: other.id, name: other.name },
   ];
   const nameById = Object.fromEntries(members.map((m) => [m.userId, m.name]));
-  const page = Math.max(1, Number(sp.page ?? 1) || 1);
-  const offset = (page - 1) * PAGE_SIZE;
+  const page = parsePage(sp.page);
+  const offset = pageOffset(page, DEFAULT_PAGE_SIZE);
+  const expenseWhere = and(
+    eq(expenses.friendshipId, id),
+    isNull(expenses.deletedAt)
+  );
 
-  const allFriendExpenses = await db
-    .select()
-    .from(expenses)
-    .where(and(eq(expenses.friendshipId, id), isNull(expenses.deletedAt)))
-    .orderBy(desc(expenses.date))
-    .all();
+  // Balance math needs the full ledger; list uses a separate paged query.
+  const [allForBalances, friendExpenses, totalRow] = await Promise.all([
+    db.select().from(expenses).where(expenseWhere).all(),
+    db
+      .select()
+      .from(expenses)
+      .where(expenseWhere)
+      .orderBy(desc(expenses.date))
+      .limit(DEFAULT_PAGE_SIZE)
+      .offset(offset)
+      .all(),
+    db
+      .select({ value: sql<number>`count(*)`.mapWith(Number) })
+      .from(expenses)
+      .where(expenseWhere)
+      .get(),
+  ]);
 
-  const expenseIds = allFriendExpenses.map((e) => e.id);
+  const balanceIds = allForBalances.map((e) => e.id);
   const [allPayers, allSplits] = await Promise.all([
-    selectByIds(expenseIds, (chunk) =>
+    selectByIds(balanceIds, (chunk) =>
       db
         .select()
         .from(expensePayers)
         .where(inArray(expensePayers.expenseId, chunk))
         .all()
     ),
-    selectByIds(expenseIds, (chunk) =>
+    selectByIds(balanceIds, (chunk) =>
       db
         .select()
         .from(expenseSplits)
@@ -98,7 +119,7 @@ export default async function FriendshipPage({
     ),
   ]);
 
-  const expensePayload = allFriendExpenses.map((e) => ({
+  const expensePayload = allForBalances.map((e) => ({
     currency: e.currency,
     payers: allPayers
       .filter((p) => p.expenseId === e.id)
@@ -114,13 +135,12 @@ export default async function FriendshipPage({
     computePairwiseDebts(expensePayload, [], [])
   );
 
-  const friendExpenses = allFriendExpenses.slice(offset, offset + PAGE_SIZE);
-  const hasMore = offset + PAGE_SIZE < allFriendExpenses.length;
-  const defaultCurrency = allFriendExpenses[0]?.currency ?? "INR";
+  const total = totalRow?.value ?? 0;
+  const defaultCurrency = friendExpenses[0]?.currency ?? "INR";
 
   return (
     <div className="space-y-6">
-      <h1 className="text-3xl font-bold text-ink">With {other.name}</h1>
+      <h1 className="page-title">With {other.name}</h1>
       <Card>
         <h2 className="mb-2 font-semibold">Balances</h2>
         <BalanceList
@@ -140,47 +160,45 @@ export default async function FriendshipPage({
       />
       <Card>
         <h2 className="mb-3 font-semibold">Expenses</h2>
-        <ul className="space-y-2 text-sm">
+        <ul className="divide-y divide-border overflow-hidden rounded-xl border border-border">
           {friendExpenses.map((e) => (
-            <li key={e.id} className="flex items-center justify-between gap-3">
-              <Link
-                href={`/friends/${id}/expenses/${e.id}`}
-                className="min-w-0 flex-1 hover:text-primary"
-              >
-                <p className="font-medium">{e.description}</p>
-                <p className="text-xs text-muted">
-                  Added by {nameById[e.createdById] ?? "someone"}
-                </p>
-              </Link>
-              <span className="money shrink-0">
-                {formatMoney(e.amount, e.currency)}
-              </span>
-              {e.createdById === session.user.id && (
-                <Link href={`/friends/${id}/expenses/${e.id}/edit`}>
-                  <Button type="button" variant="ghost" size="sm">
-                    Edit
-                  </Button>
+            <li key={e.id} className="bg-bg px-3 py-3">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
+                <Link
+                  href={`/friends/${id}/expenses/${e.id}`}
+                  className="min-w-0 flex-1 hover:text-primary"
+                >
+                  <p className="break-words font-medium">{e.description}</p>
+                  <p className="text-xs text-muted">
+                    Added by {nameById[e.createdById] ?? "someone"}
+                  </p>
                 </Link>
-              )}
+                <div className="flex items-center justify-between gap-3 sm:shrink-0 sm:justify-end">
+                  <span className="money">
+                    {formatMoney(e.amount, e.currency)}
+                  </span>
+                  {e.createdById === session.user.id && (
+                    <Link href={`/friends/${id}/expenses/${e.id}/edit`}>
+                      <Button type="button" variant="ghost" size="sm">
+                        Edit
+                      </Button>
+                    </Link>
+                  )}
+                </div>
+              </div>
             </li>
           ))}
         </ul>
-        <div className="mt-4 flex gap-2">
-          {page > 1 && (
-            <Link href={`/friends/${id}?page=${page - 1}`}>
-              <Button variant="secondary" size="sm">
-                Previous
-              </Button>
-            </Link>
-          )}
-          {hasMore && (
-            <Link href={`/friends/${id}?page=${page + 1}`}>
-              <Button variant="secondary" size="sm">
-                Next
-              </Button>
-            </Link>
-          )}
-        </div>
+        <PaginationNav
+          prevHref={
+            page > 1 ? withPageParam(`/friends/${id}`, page - 1) : null
+          }
+          nextHref={
+            hasNextPage(page, DEFAULT_PAGE_SIZE, total)
+              ? withPageParam(`/friends/${id}`, page + 1)
+              : null
+          }
+        />
       </Card>
     </div>
   );

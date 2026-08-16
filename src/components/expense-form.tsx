@@ -90,7 +90,7 @@ export function ExpenseForm({
 
   return (
     <Card className="mx-auto max-w-xl">
-      <h1 className="text-2xl font-bold text-ink">
+      <h1 className="page-title">
         {editing ? "Edit expense" : "Add expense"}
       </h1>
       <form action={action} className="mt-6 space-y-4">
@@ -103,7 +103,7 @@ export function ExpenseForm({
             required
           />
         </div>
-        <div className="grid grid-cols-2 gap-3">
+        <div className="stack-form">
           <div>
             <Label htmlFor="amount">Amount</Label>
             <Input
@@ -112,6 +112,7 @@ export function ExpenseForm({
               type="number"
               step="0.01"
               min="0.01"
+              inputMode="decimal"
               defaultValue={initialExpense?.amount}
               required
             />
@@ -131,7 +132,7 @@ export function ExpenseForm({
             </Select>
           </div>
         </div>
-        <div className="grid grid-cols-2 gap-3">
+        <div className="stack-form">
           <div>
             <Label htmlFor="date">Date</Label>
             <Input id="date" name="date" type="date" defaultValue={dateValue} />
@@ -164,11 +165,15 @@ export function ExpenseForm({
           <Label>Split among</Label>
           <div className="mt-2 space-y-2">
             {members.map((m) => (
-              <label key={m.userId} className="flex items-center gap-2 text-sm">
+              <label
+                key={m.userId}
+                className="flex min-h-11 items-center gap-3 text-sm"
+              >
                 <input
                   type="checkbox"
                   name="participantIds"
                   value={m.userId}
+                  className="h-4 w-4 shrink-0"
                   checked={selected.includes(m.userId)}
                   onChange={(e) => {
                     setSelected((prev) =>
@@ -217,12 +222,18 @@ export function ExpenseForm({
                     ? existing?.percent
                     : existing?.shares;
               return (
-                <div key={uid} className="flex items-center gap-2">
-                  <span className="w-28 truncate text-sm">{name}</span>
+                <div
+                  key={uid}
+                  className="flex flex-col gap-1.5 sm:flex-row sm:items-center sm:gap-2"
+                >
+                  <span className="shrink-0 text-sm sm:w-28 sm:truncate">
+                    {name}
+                  </span>
                   <Input
                     name={field}
                     type="number"
                     step="0.01"
+                    inputMode="decimal"
                     defaultValue={def ?? defaultSplitValues[uid]}
                     required
                   />
@@ -232,10 +243,11 @@ export function ExpenseForm({
           </div>
         )}
 
-        <label className="flex items-center gap-2 text-sm">
+        <label className="flex min-h-11 items-center gap-3 text-sm">
           <input
             type="checkbox"
             name="multiPayer"
+            className="h-4 w-4 shrink-0"
             checked={multiPayer}
             onChange={(e) => setMultiPayer(e.target.checked)}
           />
@@ -258,12 +270,18 @@ export function ExpenseForm({
             {selected.map((uid) => {
               const name = members.find((m) => m.userId === uid)?.name ?? uid;
               return (
-                <div key={uid} className="flex items-center gap-2">
-                  <span className="w-28 truncate text-sm">{name} paid</span>
+                <div
+                  key={uid}
+                  className="flex flex-col gap-1.5 sm:flex-row sm:items-center sm:gap-2"
+                >
+                  <span className="shrink-0 text-sm sm:w-28 sm:truncate">
+                    {name} paid
+                  </span>
                   <Input
                     name={`payer_${uid}`}
                     type="number"
                     step="0.01"
+                    inputMode="decimal"
                     defaultValue={payerAmountById[uid] ?? 0}
                   />
                 </div>

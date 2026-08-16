@@ -16,9 +16,9 @@ const buttonVariants = cva(
       },
       size: {
         default: "h-11 min-h-11 px-4 py-2",
-        sm: "h-9 min-h-9 rounded-lg px-3 text-xs",
+        sm: "h-9 min-h-9 rounded-lg px-3 text-xs [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:min-h-11",
         lg: "h-12 min-h-12 px-6 text-base",
-        icon: "h-10 w-10 min-h-10 min-w-10",
+        icon: "h-10 w-10 min-h-10 min-w-10 [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11 [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:min-w-11",
       },
     },
     defaultVariants: { variant: "default", size: "default" },

@@ -1,55 +1,98 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { and, eq, isNull, or } from "drizzle-orm";
+import { and, count, eq, isNull, or, sql } from "drizzle-orm";
 import { auth } from "@/auth";
 import { AvatarDisplay } from "@/components/avatar-display";
 import { Button } from "@/components/ui/button";
 import { Card, EmptyState, PageHeader } from "@/components/ui/card";
 import { NotificationList } from "@/components/notification-list";
+import { PaginationNav } from "@/components/pagination-nav";
 import { markAllNotificationsReadAction } from "@/actions/notifications";
 import { db } from "@/db";
-import { friendships, groupMembers, groups } from "@/db/schema";
+import { friendships, groupMembers, groups, notifications } from "@/db/schema";
 import {
   getGroupBalances,
   getNotificationsForUser,
   getPendingFriendIdsForUser,
   getPendingInviteIdsForEmail,
 } from "@/lib/group-data";
+import {
+  DEFAULT_PAGE_SIZE,
+  SMALL_PAGE_SIZE,
+  hasNextPage,
+  pageOffset,
+  parsePage,
+  withPageParam,
+} from "@/lib/pagination";
 import { formatMoney } from "@/lib/utils";
 
-export default async function DashboardPage() {
+export default async function DashboardPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ page?: string; notesPage?: string }>;
+}) {
   const session = await auth();
   if (!session?.user?.id) redirect("/login");
   const userId = session.user.id;
+  const sp = await searchParams;
+  const page = parsePage(sp.page);
+  const notesPage = parsePage(sp.notesPage);
+  const offset = pageOffset(page, DEFAULT_PAGE_SIZE);
+  const notesOffset = pageOffset(notesPage, SMALL_PAGE_SIZE);
 
-  const [memberships, notes, pendingGroupInviteIds, pendingFriendIds, friends] =
-    await Promise.all([
-      db
-        .select({
-          groupId: groups.id,
-          name: groups.name,
-          coverAvatarId: groups.coverAvatarId,
-          currency: groups.currency,
-        })
-        .from(groupMembers)
-        .innerJoin(groups, eq(groups.id, groupMembers.groupId))
-        .where(and(eq(groupMembers.userId, userId), isNull(groups.deletedAt)))
-        .all(),
-      getNotificationsForUser(userId),
-      getPendingInviteIdsForEmail(session.user.email),
-      getPendingFriendIdsForUser(userId),
-      db
-        .select()
-        .from(friendships)
-        .where(
-          and(
-            isNull(friendships.deletedAt),
-            eq(friendships.status, "ACCEPTED"),
-            or(eq(friendships.userAId, userId), eq(friendships.userBId, userId))
-          )
+  const membershipWhere = and(
+    eq(groupMembers.userId, userId),
+    isNull(groups.deletedAt)
+  );
+
+  const [
+    memberships,
+    membershipTotalRow,
+    notes,
+    notesTotalRow,
+    pendingGroupInviteIds,
+    pendingFriendIds,
+    friendsCountRow,
+  ] = await Promise.all([
+    db
+      .select({
+        groupId: groups.id,
+        name: groups.name,
+        coverAvatarId: groups.coverAvatarId,
+        currency: groups.currency,
+      })
+      .from(groupMembers)
+      .innerJoin(groups, eq(groups.id, groupMembers.groupId))
+      .where(membershipWhere)
+      .limit(DEFAULT_PAGE_SIZE)
+      .offset(offset)
+      .all(),
+    db
+      .select({ value: sql<number>`count(*)`.mapWith(Number) })
+      .from(groupMembers)
+      .innerJoin(groups, eq(groups.id, groupMembers.groupId))
+      .where(membershipWhere)
+      .get(),
+    getNotificationsForUser(userId, SMALL_PAGE_SIZE, notesOffset),
+    db
+      .select({ value: sql<number>`count(*)`.mapWith(Number) })
+      .from(notifications)
+      .where(eq(notifications.userId, userId))
+      .get(),
+    getPendingInviteIdsForEmail(session.user.email),
+    getPendingFriendIdsForUser(userId),
+    db
+      .select({ value: count() })
+      .from(friendships)
+      .where(
+        and(
+          isNull(friendships.deletedAt),
+          eq(friendships.status, "ACCEPTED"),
+          or(eq(friendships.userAId, userId), eq(friendships.userBId, userId))
         )
-        .all(),
-    ]);
+      )
+      .get(),
+  ]);
 
   const groupCards = await Promise.all(
     memberships.map(async (m) => {
@@ -68,6 +111,10 @@ export default async function DashboardPage() {
     })
   );
 
+  const totalGroups = membershipTotalRow?.value ?? 0;
+  const totalNotes = notesTotalRow?.value ?? 0;
+  const friendsCount = friendsCountRow?.value ?? 0;
+
   return (
     <div className="space-y-8">
       <PageHeader
@@ -82,7 +129,7 @@ export default async function DashboardPage() {
 
       <section aria-label="Groups" className="space-y-3">
         <h2 className="text-sm font-semibold text-muted">Groups</h2>
-        {groupCards.length === 0 ? (
+        {groupCards.length === 0 && page === 1 ? (
           <EmptyState
             title="No groups yet"
             description="Create a group and invite up to four friends to start tracking shared expenses."
@@ -93,47 +140,65 @@ export default async function DashboardPage() {
             }
           />
         ) : (
-          <ul className="divide-y divide-border rounded-2xl border border-border bg-surface">
-            {groupCards.map((g) => (
-              <li key={g.groupId}>
-                <Link
-                  href={`/groups/${g.groupId}`}
-                  className="flex items-center gap-3 px-4 py-3.5 transition-colors duration-150 hover:bg-bg"
-                >
-                  <AvatarDisplay
-                    avatarId={g.coverAvatarId}
-                    name={g.name}
-                    size={44}
-                  />
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate font-semibold text-ink">{g.name}</p>
-                    {g.nets.length === 0 ? (
-                      <p className="text-sm money text-muted">Settled up</p>
-                    ) : (
-                      <div className="space-y-0.5">
-                        {g.nets.map((n) => (
-                          <p
-                            key={n.currency}
-                            className={`text-sm money ${
-                              n.myNet > 0.009
-                                ? "text-owed"
-                                : n.myNet < -0.009
-                                  ? "text-owe"
-                                  : "text-muted"
-                            }`}
-                          >
-                            {n.myNet > 0
-                              ? `You’re owed ${formatMoney(n.myNet, n.currency)}`
-                              : `You owe ${formatMoney(Math.abs(n.myNet), n.currency)}`}
-                          </p>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </Link>
-              </li>
-            ))}
-          </ul>
+          <>
+            <ul className="divide-y divide-border rounded-2xl border border-border bg-surface">
+              {groupCards.map((g) => (
+                <li key={g.groupId}>
+                  <Link
+                    href={`/groups/${g.groupId}`}
+                    className="flex min-h-14 items-center gap-3 px-4 py-3.5 transition-colors duration-150 hover:bg-bg"
+                  >
+                    <AvatarDisplay
+                      avatarId={g.coverAvatarId}
+                      name={g.name}
+                      size={44}
+                    />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate font-semibold text-ink">{g.name}</p>
+                      {g.nets.length === 0 ? (
+                        <p className="text-sm money text-muted">Settled up</p>
+                      ) : (
+                        <div className="space-y-0.5">
+                          {g.nets.map((n) => (
+                            <p
+                              key={n.currency}
+                              className={`text-sm money ${
+                                n.myNet > 0.009
+                                  ? "text-owed"
+                                  : n.myNet < -0.009
+                                    ? "text-owe"
+                                    : "text-muted"
+                              }`}
+                            >
+                              {n.myNet > 0
+                                ? `You’re owed ${formatMoney(n.myNet, n.currency)}`
+                                : `You owe ${formatMoney(Math.abs(n.myNet), n.currency)}`}
+                            </p>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+            <PaginationNav
+              prevHref={
+                page > 1
+                  ? withPageParam("/dashboard", page - 1, {
+                      notesPage: notesPage > 1 ? String(notesPage) : undefined,
+                    })
+                  : null
+              }
+              nextHref={
+                hasNextPage(page, DEFAULT_PAGE_SIZE, totalGroups)
+                  ? withPageParam("/dashboard", page + 1, {
+                      notesPage: notesPage > 1 ? String(notesPage) : undefined,
+                    })
+                  : null
+              }
+            />
+          </>
         )}
       </section>
 
@@ -159,6 +224,22 @@ export default async function DashboardPage() {
             pendingGroupInviteIds={pendingGroupInviteIds}
             pendingFriendIds={pendingFriendIds}
           />
+          <PaginationNav
+            prevHref={
+              notesPage > 1
+                ? withPageParam("/dashboard", page, {
+                    notesPage: String(notesPage - 1),
+                  })
+                : null
+            }
+            nextHref={
+              hasNextPage(notesPage, SMALL_PAGE_SIZE, totalNotes)
+                ? withPageParam("/dashboard", page, {
+                    notesPage: String(notesPage + 1),
+                  })
+                : null
+            }
+          />
         </Card>
         <Card>
           <div className="mb-4 flex items-center justify-between gap-2">
@@ -170,7 +251,7 @@ export default async function DashboardPage() {
             </Link>
           </div>
           <p className="text-3xl font-bold money tracking-tight text-ink">
-            {friends.length}
+            {friendsCount}
           </p>
           <p className="mt-1 text-sm text-muted">
             People you can split with outside a group.

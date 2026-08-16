@@ -8,7 +8,7 @@ export function Card({
   return (
     <div
       className={cn(
-        "rounded-2xl border border-border bg-surface p-5 shadow-[0_1px_2px_var(--shadow)]",
+        "rounded-2xl border border-border bg-surface p-4 shadow-[0_1px_2px_var(--shadow)] sm:p-5",
         className
       )}
       {...props}
@@ -26,14 +26,20 @@ export function PageHeader({
   actions?: ReactNode;
 }) {
   return (
-    <div className="flex flex-wrap items-end justify-between gap-4">
+    <div className="flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-end sm:justify-between">
       <div className="min-w-0">
         <h1 className="page-title">{title}</h1>
         {description && (
-          <p className="mt-1 max-w-prose text-sm text-muted">{description}</p>
+          <p className="mt-1 max-w-prose text-pretty text-sm text-muted">
+            {description}
+          </p>
         )}
       </div>
-      {actions ? <div className="flex flex-wrap gap-2">{actions}</div> : null}
+      {actions ? (
+        <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap [&_a]:block [&_button]:w-full sm:[&_button]:w-auto">
+          {actions}
+        </div>
+      ) : null}
     </div>
   );
 }

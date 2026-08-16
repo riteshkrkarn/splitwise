@@ -18,7 +18,7 @@ function LoginForm() {
   const next = useSearchParams().get("next") ?? "/dashboard";
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-bg px-4">
+    <div className="flex min-h-dvh items-center justify-center bg-bg px-4 py-8" style={{ paddingTop: "max(2rem, env(safe-area-inset-top))", paddingBottom: "max(2rem, env(safe-area-inset-bottom))" }}>
       <Card className="w-full max-w-md">
         <p className="text-sm font-semibold text-primary">Splitwise</p>
         <h1 className="mt-2 text-2xl font-bold tracking-tight">Log in</h1>

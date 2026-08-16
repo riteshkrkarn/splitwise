@@ -180,15 +180,18 @@ export const getGroupBalances = cache(
   }
 );
 
-export const getNotificationsForUser = cache(async (userId: string) => {
-  return db
-    .select()
-    .from(notifications)
-    .where(eq(notifications.userId, userId))
-    .orderBy(desc(notifications.createdAt))
-    .limit(12)
-    .all();
-});
+export const getNotificationsForUser = cache(
+  async (userId: string, limit = 12, offset = 0) => {
+    return db
+      .select()
+      .from(notifications)
+      .where(eq(notifications.userId, userId))
+      .orderBy(desc(notifications.createdAt))
+      .limit(limit)
+      .offset(offset)
+      .all();
+  }
+);
 
 export const getPendingInviteIdsForEmail = cache(async (email: string) => {
   return (

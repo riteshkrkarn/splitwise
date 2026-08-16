@@ -8,21 +8,27 @@ import { BalanceList } from "@/components/balance-list";
 import { Button } from "@/components/ui/button";
 import { Card, EmptyState, Select } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { PaginationNav } from "@/components/pagination-nav";
 import { db } from "@/db";
-import { expensePayers, expenses, users } from "@/db/schema";
+import { expensePayers, expenses, settlements, users } from "@/db/schema";
 import { CATEGORIES } from "@/lib/utils";
 import {
   assertGroupMember,
   getGroupBalances,
-  getGroupExpenseBundle,
   getGroupMembers,
   getGroupOrThrow,
   getPendingInvites,
 } from "@/lib/group-data";
+import {
+  DEFAULT_PAGE_SIZE,
+  SMALL_PAGE_SIZE,
+  hasNextPage,
+  pageOffset,
+  parsePage,
+  withPageParam,
+} from "@/lib/pagination";
 import { formatMoney } from "@/lib/utils";
 import { InviteForm } from "./group-forms";
-
-const PAGE_SIZE = 25;
 
 export default async function GroupPage({
   params,
@@ -35,6 +41,8 @@ export default async function GroupPage({
     addedBy?: string;
     paidBy?: string;
     page?: string;
+    settlementsPage?: string;
+    deletedPage?: string;
   }>;
 }) {
   const { id } = await params;
@@ -48,18 +56,29 @@ export default async function GroupPage({
     notFound();
   }
 
-  const page = Math.max(1, Number(sp.page ?? 1) || 1);
-  const offset = (page - 1) * PAGE_SIZE;
+  const page = parsePage(sp.page);
+  const settlementsPage = parsePage(sp.settlementsPage);
+  const deletedPage = parsePage(sp.deletedPage);
+  const offset = pageOffset(page, DEFAULT_PAGE_SIZE);
+  const settlementsOffset = pageOffset(settlementsPage, SMALL_PAGE_SIZE);
+  const deletedOffset = pageOffset(deletedPage, SMALL_PAGE_SIZE);
 
-  const [group, members, balances, invites, bundle] = await Promise.all([
+  const [group, members, balances, invites] = await Promise.all([
     getGroupOrThrow(id),
     getGroupMembers(id),
     getGroupBalances(id),
     getPendingInvites(id),
-    getGroupExpenseBundle(id),
   ]);
   const nameById = Object.fromEntries(members.map((m) => [m.userId, m.name]));
-  const { settlements } = bundle;
+  const filterExtra = {
+    q: sp.q,
+    category: sp.category,
+    addedBy: sp.addedBy,
+    paidBy: sp.paidBy,
+    settlementsPage:
+      settlementsPage > 1 ? String(settlementsPage) : undefined,
+    deletedPage: deletedPage > 1 ? String(deletedPage) : undefined,
+  };
 
   const conditions = [eq(expenses.groupId, id)];
   if (sp.q) conditions.push(like(expenses.description, `%${sp.q}%`));
@@ -86,13 +105,29 @@ export default async function GroupPage({
     );
   }
 
-  const [active, totalRow, deleted] = await Promise.all([
+  const settlementWhere = and(
+    eq(settlements.groupId, id),
+    isNull(settlements.deletedAt)
+  );
+  const deletedWhere = and(
+    eq(expenses.groupId, id),
+    isNotNull(expenses.deletedAt)
+  );
+
+  const [
+    active,
+    totalRow,
+    settlementRows,
+    settlementTotalRow,
+    deleted,
+    deletedTotalRow,
+  ] = await Promise.all([
     db
       .select()
       .from(expenses)
       .where(and(...conditions, isNull(expenses.deletedAt)))
       .orderBy(desc(expenses.date))
-      .limit(PAGE_SIZE)
+      .limit(DEFAULT_PAGE_SIZE)
       .offset(offset)
       .all(),
     db
@@ -102,15 +137,35 @@ export default async function GroupPage({
       .get(),
     db
       .select()
-      .from(expenses)
-      .where(and(eq(expenses.groupId, id), isNotNull(expenses.deletedAt)))
-      .orderBy(desc(expenses.deletedAt))
-      .limit(10)
+      .from(settlements)
+      .where(settlementWhere)
+      .orderBy(desc(settlements.date))
+      .limit(SMALL_PAGE_SIZE)
+      .offset(settlementsOffset)
       .all(),
+    db
+      .select({ value: sql<number>`count(*)`.mapWith(Number) })
+      .from(settlements)
+      .where(settlementWhere)
+      .get(),
+    db
+      .select()
+      .from(expenses)
+      .where(deletedWhere)
+      .orderBy(desc(expenses.deletedAt))
+      .limit(SMALL_PAGE_SIZE)
+      .offset(deletedOffset)
+      .all(),
+    db
+      .select({ value: sql<number>`count(*)`.mapWith(Number) })
+      .from(expenses)
+      .where(deletedWhere)
+      .get(),
   ]);
 
   const total = totalRow?.value ?? 0;
-  const hasMore = offset + PAGE_SIZE < total;
+  const settlementTotal = settlementTotalRow?.value ?? 0;
+  const deletedTotal = deletedTotalRow?.value ?? 0;
 
   const payerRows =
     active.length === 0
@@ -146,25 +201,33 @@ export default async function GroupPage({
   }
 
   function pageHref(nextPage: number) {
-    const params = new URLSearchParams();
-    if (sp.q) params.set("q", sp.q);
-    if (sp.category) params.set("category", sp.category);
-    if (sp.addedBy) params.set("addedBy", sp.addedBy);
-    if (sp.paidBy) params.set("paidBy", sp.paidBy);
-    params.set("page", String(nextPage));
-    return `/groups/${id}?${params.toString()}`;
+    return withPageParam(`/groups/${id}`, nextPage, filterExtra);
+  }
+
+  function settlementsHref(nextPage: number) {
+    return withPageParam(`/groups/${id}`, page, {
+      ...filterExtra,
+      settlementsPage: String(nextPage),
+    });
+  }
+
+  function deletedHref(nextPage: number) {
+    return withPageParam(`/groups/${id}`, page, {
+      ...filterExtra,
+      deletedPage: String(nextPage),
+    });
   }
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div className="flex items-center gap-4">
+      <div className="flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-start sm:justify-between">
+        <div className="flex min-w-0 items-center gap-3 sm:gap-4">
           <AvatarDisplay
             avatarId={group.coverAvatarId}
             name={group.name}
             size={56}
           />
-          <div>
+          <div className="min-w-0">
             <h1 className="page-title">{group.name}</h1>
             <p className="mt-1 text-sm text-muted">
               {members.length}/5 members · {group.currency}
@@ -172,18 +235,22 @@ export default async function GroupPage({
             </p>
           </div>
         </div>
-        <div className="flex flex-wrap gap-2">
-          <Link href={`/groups/${id}/expenses/new`}>
-            <Button>Add expense</Button>
+        <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap">
+          <Link href={`/groups/${id}/expenses/new`} className="sm:inline-flex">
+            <Button className="w-full sm:w-auto">Add expense</Button>
           </Link>
-          <Link href={`/groups/${id}/settings`}>
-            <Button variant="outline">Settings</Button>
-          </Link>
-          <Link href={`/groups/${id}/export?format=csv`}>
-            <Button variant="ghost" size="sm">
-              Export
-            </Button>
-          </Link>
+          <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
+            <Link href={`/groups/${id}/settings`} className="min-w-0">
+              <Button variant="outline" className="w-full sm:w-auto">
+                Settings
+              </Button>
+            </Link>
+            <Link href={`/groups/${id}/export?format=csv`} className="min-w-0">
+              <Button variant="ghost" size="sm" className="w-full sm:w-auto">
+                Export
+              </Button>
+            </Link>
+          </div>
         </div>
       </div>
 
@@ -233,20 +300,20 @@ export default async function GroupPage({
         </Card>
       </div>
 
-      <Card className="p-0 overflow-hidden">
-        <div className="flex flex-wrap items-end justify-between gap-3 border-b border-border px-5 py-4">
+      <Card className="overflow-hidden p-0">
+        <div className="space-y-3 border-b border-border px-4 py-4 sm:px-5">
           <h2 className="font-semibold">Expenses</h2>
-          <form className="flex flex-wrap gap-2">
+          <form className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-[minmax(0,1fr)_minmax(0,9rem)_minmax(0,10rem)_minmax(0,10rem)_auto]">
             <Input
               name="q"
               placeholder="Search…"
               defaultValue={sp.q}
-              className="w-36"
+              className="w-full min-w-0"
             />
             <Select
               name="category"
               defaultValue={sp.category ?? ""}
-              className="h-11 w-36"
+              className="h-11 w-full min-w-0"
               aria-label="Category"
             >
               <option value="">All categories</option>
@@ -259,7 +326,7 @@ export default async function GroupPage({
             <Select
               name="addedBy"
               defaultValue={sp.addedBy ?? ""}
-              className="h-11 w-40"
+              className="h-11 w-full min-w-0"
               aria-label="Added by"
             >
               <option value="">Anyone added</option>
@@ -272,7 +339,7 @@ export default async function GroupPage({
             <Select
               name="paidBy"
               defaultValue={sp.paidBy ?? ""}
-              className="h-11 w-40"
+              className="h-11 w-full min-w-0"
               aria-label="Paid by"
             >
               <option value="">Anyone paid</option>
@@ -282,7 +349,12 @@ export default async function GroupPage({
                 </option>
               ))}
             </Select>
-            <Button type="submit" variant="secondary" size="sm">
+            <Button
+              type="submit"
+              variant="secondary"
+              size="sm"
+              className="w-full sm:w-auto lg:self-stretch"
+            >
               Filter
             </Button>
           </form>
@@ -311,12 +383,14 @@ export default async function GroupPage({
           <ul className="divide-y divide-border">
             {active.map((e) => (
               <li key={e.id}>
-                <div className="flex items-center gap-3 px-5 py-3.5">
+                <div className="flex flex-col gap-2 px-4 py-3.5 sm:flex-row sm:items-center sm:gap-3 sm:px-5">
                   <Link
                     href={`/groups/${id}/expenses/${e.id}`}
                     className="min-w-0 flex-1 transition-colors hover:text-primary"
                   >
-                    <p className="truncate font-medium">{e.description}</p>
+                    <p className="wrap-break-word font-medium sm:truncate">
+                      {e.description}
+                    </p>
                     <p className="text-sm text-ink">
                       Added by {creatorNameById[e.createdById] ?? "someone"}
                     </p>
@@ -327,48 +401,41 @@ export default async function GroupPage({
                         : ""}
                     </p>
                   </Link>
-                  <p className="money shrink-0">
-                    {formatMoney(e.amount, e.currency)}
-                  </p>
-                  {e.createdById === session.user.id && (
-                    <Link href={`/groups/${id}/expenses/${e.id}/edit`}>
-                      <Button type="button" variant="ghost" size="sm">
-                        Edit
-                      </Button>
-                    </Link>
-                  )}
+                  <div className="flex items-center justify-between gap-3 sm:shrink-0 sm:justify-end">
+                    <p className="money">
+                      {formatMoney(e.amount, e.currency)}
+                    </p>
+                    {e.createdById === session.user.id && (
+                      <Link href={`/groups/${id}/expenses/${e.id}/edit`}>
+                        <Button type="button" variant="ghost" size="sm">
+                          Edit
+                        </Button>
+                      </Link>
+                    )}
+                  </div>
                 </div>
               </li>
             ))}
           </ul>
         )}
-        {(page > 1 || hasMore) && (
-          <div className="flex gap-2 border-t border-border px-5 py-3">
-            {page > 1 && (
-              <Link href={pageHref(page - 1)}>
-                <Button variant="secondary" size="sm">
-                  Previous
-                </Button>
-              </Link>
-            )}
-            {hasMore && (
-              <Link href={pageHref(page + 1)}>
-                <Button variant="secondary" size="sm">
-                  Next
-                </Button>
-              </Link>
-            )}
-          </div>
-        )}
+        <PaginationNav
+          className="border-t border-border px-5 py-3"
+          prevHref={page > 1 ? pageHref(page - 1) : null}
+          nextHref={
+            hasNextPage(page, DEFAULT_PAGE_SIZE, total)
+              ? pageHref(page + 1)
+              : null
+          }
+        />
       </Card>
 
       <Card>
         <h2 className="mb-3 text-sm font-semibold text-muted">Settlements</h2>
         <ul className="space-y-2 text-sm">
-          {settlements.length === 0 && (
+          {settlementRows.length === 0 && (
             <li className="text-muted">No transfers recorded yet.</li>
           )}
-          {settlements.map((s) => (
+          {settlementRows.map((s) => (
             <li key={s.id} className="flex flex-wrap justify-between gap-2">
               <span>
                 <span className="font-medium">
@@ -389,18 +456,33 @@ export default async function GroupPage({
             </li>
           ))}
         </ul>
+        <PaginationNav
+          prevHref={
+            settlementsPage > 1 ? settlementsHref(settlementsPage - 1) : null
+          }
+          nextHref={
+            hasNextPage(settlementsPage, SMALL_PAGE_SIZE, settlementTotal)
+              ? settlementsHref(settlementsPage + 1)
+              : null
+          }
+        />
       </Card>
 
-      {deleted.length > 0 && (
+      {deletedTotal > 0 && (
         <Card>
           <h2 className="mb-3 text-sm font-semibold text-muted">Deleted</h2>
           <ul className="space-y-2 text-sm">
             {deleted.map((e) => (
-              <li key={e.id} className="flex justify-between gap-2">
-                <span className="text-muted">{e.description}</span>
+              <li
+                key={e.id}
+                className="flex flex-col gap-1 sm:flex-row sm:justify-between sm:gap-2"
+              >
+                <span className="min-w-0 wrap-break-word text-muted">
+                  {e.description}
+                </span>
                 {e.createdById === session.user.id && (
                   <Link
-                    className="font-medium text-accent"
+                    className="shrink-0 font-medium text-accent"
                     href={`/groups/${id}/expenses/${e.id}`}
                   >
                     Restore
@@ -409,6 +491,16 @@ export default async function GroupPage({
               </li>
             ))}
           </ul>
+          <PaginationNav
+            prevHref={
+              deletedPage > 1 ? deletedHref(deletedPage - 1) : null
+            }
+            nextHref={
+              hasNextPage(deletedPage, SMALL_PAGE_SIZE, deletedTotal)
+                ? deletedHref(deletedPage + 1)
+                : null
+            }
+          />
         </Card>
       )}
     </div>

@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { desc, eq } from "drizzle-orm";
+import { desc, eq, sql } from "drizzle-orm";
 import { auth } from "@/auth";
 import {
   restoreExpenseAction,
@@ -9,6 +9,7 @@ import {
 import { AvatarDisplay } from "@/components/avatar-display";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { PaginationNav } from "@/components/pagination-nav";
 import { db } from "@/db";
 import {
   expenseComments,
@@ -21,15 +22,25 @@ import {
   users,
 } from "@/db/schema";
 import { assertGroupMember, getGroupMembers } from "@/lib/group-data";
+import {
+  SMALL_PAGE_SIZE,
+  hasNextPage,
+  pageOffset,
+  parsePage,
+  withPageParam,
+} from "@/lib/pagination";
 import { formatMoney } from "@/lib/utils";
 import { CommentForm, ReceiptForm } from "./expense-forms";
 
 export default async function ExpenseDetailPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string; expenseId: string }>;
+  searchParams: Promise<{ commentsPage?: string; historyPage?: string }>;
 }) {
   const { id, expenseId } = await params;
+  const sp = await searchParams;
   const session = await auth();
   if (!session?.user?.id) redirect("/login");
   try {
@@ -38,6 +49,12 @@ export default async function ExpenseDetailPage({
     notFound();
   }
 
+  const commentsPage = parsePage(sp.commentsPage);
+  const historyPage = parsePage(sp.historyPage);
+  const commentsOffset = pageOffset(commentsPage, SMALL_PAGE_SIZE);
+  const historyOffset = pageOffset(historyPage, SMALL_PAGE_SIZE);
+  const basePath = `/groups/${id}/expenses/${expenseId}`;
+
   const expense = await db
     .select()
     .from(expenses)
@@ -45,40 +62,62 @@ export default async function ExpenseDetailPage({
     .get();
   if (!expense || expense.groupId !== id) notFound();
 
-  const [members, splits, payers, comments, history, receipt] =
-    await Promise.all([
-      getGroupMembers(id),
-      db
-        .select()
-        .from(expenseSplits)
-        .where(eq(expenseSplits.expenseId, expenseId))
-        .all(),
-      db
-        .select()
-        .from(expensePayers)
-        .where(eq(expensePayers.expenseId, expenseId))
-        .all(),
-      db
-        .select({
-          id: expenseComments.id,
-          body: expenseComments.body,
-          createdAt: expenseComments.createdAt,
-          name: users.name,
-          avatarId: users.avatarId,
-        })
-        .from(expenseComments)
-        .innerJoin(users, eq(users.id, expenseComments.userId))
-        .where(eq(expenseComments.expenseId, expenseId))
-        .orderBy(desc(expenseComments.createdAt))
-        .all(),
-      db
-        .select()
-        .from(expenseHistory)
-        .where(eq(expenseHistory.expenseId, expenseId))
-        .orderBy(desc(expenseHistory.createdAt))
-        .all(),
-      db.select().from(receipts).where(eq(receipts.expenseId, expenseId)).get(),
-    ]);
+  const [
+    members,
+    splits,
+    payers,
+    comments,
+    commentsTotalRow,
+    history,
+    historyTotalRow,
+    receipt,
+  ] = await Promise.all([
+    getGroupMembers(id),
+    db
+      .select()
+      .from(expenseSplits)
+      .where(eq(expenseSplits.expenseId, expenseId))
+      .all(),
+    db
+      .select()
+      .from(expensePayers)
+      .where(eq(expensePayers.expenseId, expenseId))
+      .all(),
+    db
+      .select({
+        id: expenseComments.id,
+        body: expenseComments.body,
+        createdAt: expenseComments.createdAt,
+        name: users.name,
+        avatarId: users.avatarId,
+      })
+      .from(expenseComments)
+      .innerJoin(users, eq(users.id, expenseComments.userId))
+      .where(eq(expenseComments.expenseId, expenseId))
+      .orderBy(desc(expenseComments.createdAt))
+      .limit(SMALL_PAGE_SIZE)
+      .offset(commentsOffset)
+      .all(),
+    db
+      .select({ value: sql<number>`count(*)`.mapWith(Number) })
+      .from(expenseComments)
+      .where(eq(expenseComments.expenseId, expenseId))
+      .get(),
+    db
+      .select()
+      .from(expenseHistory)
+      .where(eq(expenseHistory.expenseId, expenseId))
+      .orderBy(desc(expenseHistory.createdAt))
+      .limit(SMALL_PAGE_SIZE)
+      .offset(historyOffset)
+      .all(),
+    db
+      .select({ value: sql<number>`count(*)`.mapWith(Number) })
+      .from(expenseHistory)
+      .where(eq(expenseHistory.expenseId, expenseId))
+      .get(),
+    db.select().from(receipts).where(eq(receipts.expenseId, expenseId)).get(),
+  ]);
 
   const nameById = Object.fromEntries(members.map((m) => [m.userId, m.name]));
   const items = receipt
@@ -90,6 +129,8 @@ export default async function ExpenseDetailPage({
     : [];
 
   const isCreator = expense.createdById === session.user.id;
+  const commentsTotal = commentsTotalRow?.value ?? 0;
+  const historyTotal = historyTotalRow?.value ?? 0;
 
   return (
     <div className="mx-auto max-w-2xl space-y-4">
@@ -190,6 +231,26 @@ export default async function ExpenseDetailPage({
           ))}
         </ul>
         <CommentForm expenseId={expenseId} />
+        <PaginationNav
+          prevHref={
+            commentsPage > 1
+              ? withPageParam(basePath, 1, {
+                  commentsPage: String(commentsPage - 1),
+                  historyPage:
+                    historyPage > 1 ? String(historyPage) : undefined,
+                })
+              : null
+          }
+          nextHref={
+            hasNextPage(commentsPage, SMALL_PAGE_SIZE, commentsTotal)
+              ? withPageParam(basePath, 1, {
+                  commentsPage: String(commentsPage + 1),
+                  historyPage:
+                    historyPage > 1 ? String(historyPage) : undefined,
+                })
+              : null
+          }
+        />
       </Card>
 
       <Card>
@@ -230,6 +291,26 @@ export default async function ExpenseDetailPage({
             </li>
           ))}
         </ul>
+        <PaginationNav
+          prevHref={
+            historyPage > 1
+              ? withPageParam(basePath, 1, {
+                  historyPage: String(historyPage - 1),
+                  commentsPage:
+                    commentsPage > 1 ? String(commentsPage) : undefined,
+                })
+              : null
+          }
+          nextHref={
+            hasNextPage(historyPage, SMALL_PAGE_SIZE, historyTotal)
+              ? withPageParam(basePath, 1, {
+                  historyPage: String(historyPage + 1),
+                  commentsPage:
+                    commentsPage > 1 ? String(commentsPage) : undefined,
+                })
+              : null
+          }
+        />
       </Card>
     </div>
   );

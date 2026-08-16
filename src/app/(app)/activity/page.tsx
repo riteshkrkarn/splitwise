@@ -6,18 +6,18 @@ import { Button } from "@/components/ui/button";
 import { Card, EmptyState, PageHeader } from "@/components/ui/card";
 import { db } from "@/db";
 import { activityEvents, groupMembers, groups } from "@/db/schema";
-
-const PAGE_SIZE = 50;
+import { DEFAULT_PAGE_SIZE, parsePage } from "@/lib/pagination";
 
 export default async function ActivityPage({
   searchParams,
 }: {
-  searchParams: Promise<{ cursor?: string }>;
+  searchParams: Promise<{ cursor?: string; page?: string }>;
 }) {
   const session = await auth();
   if (!session?.user?.id) redirect("/login");
   const sp = await searchParams;
   const cursor = sp.cursor ? Number(sp.cursor) : null;
+  const page = parsePage(sp.page);
 
   const memberships = await db
     .select({ groupId: groupMembers.groupId })
@@ -46,13 +46,14 @@ export default async function ActivityPage({
         : baseWhere
     )
     .orderBy(desc(activityEvents.createdAt))
-    .limit(PAGE_SIZE + 1)
+    .limit(DEFAULT_PAGE_SIZE + 1)
+    .offset(cursor ? 0 : (page - 1) * DEFAULT_PAGE_SIZE)
     .all();
 
-  const hasMore = events.length > PAGE_SIZE;
-  const page = hasMore ? events.slice(0, PAGE_SIZE) : events;
+  const hasMore = events.length > DEFAULT_PAGE_SIZE;
+  const pageEvents = hasMore ? events.slice(0, DEFAULT_PAGE_SIZE) : events;
   const nextCursor = hasMore
-    ? page[page.length - 1]?.createdAt.getTime()
+    ? pageEvents[pageEvents.length - 1]?.createdAt.getTime()
     : null;
 
   return (
@@ -61,7 +62,7 @@ export default async function ActivityPage({
         title="Activity"
         description="Recent changes across your groups."
       />
-      {page.length === 0 ? (
+      {pageEvents.length === 0 ? (
         <EmptyState
           title="Nothing here yet"
           description="When people add expenses, settle up, or join groups, it shows up here."
@@ -69,7 +70,7 @@ export default async function ActivityPage({
       ) : (
         <Card className="overflow-hidden p-0">
           <ul className="divide-y divide-border">
-            {page.map((e) => (
+            {pageEvents.map((e) => (
               <li key={e.id} className="px-5 py-3.5">
                 <p className="text-sm font-medium text-ink">{e.message}</p>
                 <p className="mt-0.5 text-xs text-muted">
@@ -79,15 +80,28 @@ export default async function ActivityPage({
               </li>
             ))}
           </ul>
-          {nextCursor && (
-            <div className="border-t border-border px-5 py-3">
-              <Link href={`/activity?cursor=${nextCursor}`}>
+          <div className="flex flex-wrap gap-2 border-t border-border px-5 py-3">
+            {!cursor && page > 1 && (
+              <Link href={`/activity?page=${page - 1}`}>
                 <Button variant="secondary" size="sm">
-                  Load more
+                  Previous
                 </Button>
               </Link>
-            </div>
-          )}
+            )}
+            {nextCursor && (
+              <Link
+                href={
+                  cursor
+                    ? `/activity?cursor=${nextCursor}`
+                    : `/activity?page=${page + 1}`
+                }
+              >
+                <Button variant="secondary" size="sm">
+                  Next
+                </Button>
+              </Link>
+            )}
+          </div>
         </Card>
       )}
     </div>

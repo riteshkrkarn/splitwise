@@ -144,7 +144,7 @@ export function NavbarControls({
             role="dialog"
             aria-modal="true"
             aria-label="Notifications"
-            className="absolute right-0 z-50 mt-2 w-[min(100vw-2rem,22rem)] overflow-hidden rounded-2xl border border-border bg-surface shadow-[0_12px_40px_var(--shadow)]"
+            className="fixed inset-x-3 top-[calc(env(safe-area-inset-top)+3.5rem)] z-50 max-h-[min(28rem,calc(100dvh-8rem))] overflow-hidden rounded-2xl border border-border bg-surface shadow-[0_12px_40px_var(--shadow)] sm:absolute sm:inset-x-auto sm:right-0 sm:top-auto sm:mt-2 sm:max-h-none sm:w-[min(100vw-2rem,22rem)]"
           >
             <div className="border-b border-border px-4 py-3">
               <p className="text-sm font-semibold">Notifications</p>
@@ -184,7 +184,7 @@ export function NavbarControls({
                         title="Mark as read"
                         aria-label="Mark as read"
                         onClick={() => dismissNotification(n.id)}
-                        className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-primary transition-colors duration-150 hover:bg-bg"
+                        className="mt-0.5 flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-primary transition-colors duration-150 hover:bg-bg"
                       >
                         <Check className="h-4 w-4" strokeWidth={2.5} />
                       </button>

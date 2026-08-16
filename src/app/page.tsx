@@ -8,28 +8,30 @@ export default async function HomePage() {
   if (session?.user) redirect("/dashboard");
 
   return (
-    <div className="relative min-h-screen overflow-hidden bg-bg">
+    <div className="relative min-h-dvh overflow-hidden bg-bg">
       <div
         aria-hidden
-        className="pointer-events-none absolute inset-x-0 top-0 h-[28rem] bg-[radial-gradient(ellipse_at_top,oklch(0.92_0.06_357)_0%,transparent_60%)] dark:bg-[radial-gradient(ellipse_at_top,oklch(0.28_0.06_357)_0%,transparent_55%)]"
+        className="pointer-events-none absolute inset-x-0 top-0 h-112 bg-[radial-gradient(ellipse_at_top,oklch(0.92_0.06_357)_0%,transparent_60%)] dark:bg-[radial-gradient(ellipse_at_top,oklch(0.28_0.06_357)_0%,transparent_55%)]"
       />
-      <div className="relative mx-auto flex min-h-screen max-w-3xl flex-col justify-center px-6 py-16">
+      <div className="relative mx-auto flex min-h-dvh max-w-3xl flex-col justify-center px-6 py-16">
         <p className="text-sm font-semibold tracking-wide text-primary">
           Splitwise
         </p>
-        <h1 className="mt-4 max-w-xl text-4xl font-bold tracking-tight text-ink sm:text-5xl">
+        <h1 className="mt-4 max-w-xl text-balance text-3xl font-bold tracking-tight text-ink sm:text-5xl">
           Split shared costs. Trust the numbers.
         </h1>
         <p className="mt-4 max-w-lg text-base leading-relaxed text-muted sm:text-lg">
           Keep group expenses accurate and private — for friends, flatmates, and
           whoever’s splitting the bill. No occasion required.
         </p>
-        <div className="mt-8 flex flex-wrap gap-3">
-          <Link href="/register">
-            <Button size="lg">Create account</Button>
+        <div className="mt-8 flex w-full max-w-sm flex-col gap-3 sm:max-w-none sm:flex-row sm:flex-wrap">
+          <Link href="/register" className="sm:inline-flex">
+            <Button size="lg" className="w-full sm:w-auto">
+              Create account
+            </Button>
           </Link>
-          <Link href="/login">
-            <Button size="lg" variant="secondary">
+          <Link href="/login" className="sm:inline-flex">
+            <Button size="lg" variant="secondary" className="w-full sm:w-auto">
               Log in
             </Button>
           </Link>

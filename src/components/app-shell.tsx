@@ -3,6 +3,7 @@ import { Suspense } from "react";
 import { auth } from "@/auth";
 import { logoutAction } from "@/actions/auth";
 import { AvatarDisplay } from "@/components/avatar-display";
+import { MobileBottomNav } from "@/components/mobile-bottom-nav";
 import { NavbarControls } from "@/components/navbar-controls";
 import { Button } from "@/components/ui/button";
 import {
@@ -54,7 +55,7 @@ async function NavbarData({
 function NavbarSkeleton() {
   return (
     <div
-      className="h-9 w-9 animate-pulse rounded-full bg-surface"
+      className="h-11 w-11 animate-pulse rounded-full bg-surface"
       aria-hidden
     />
   );
@@ -64,9 +65,12 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
   const session = await auth();
 
   return (
-    <div className="min-h-screen bg-bg text-ink">
-      <header className="sticky top-0 z-30 border-b border-border bg-bg/90 backdrop-blur-md">
-        <div className="mx-auto flex max-w-5xl items-center gap-3 px-4 py-3">
+    <div className="min-h-dvh bg-bg text-ink">
+      <header
+        className="sticky top-0 z-30 border-b border-border bg-bg/95 backdrop-blur-md"
+        style={{ paddingTop: "env(safe-area-inset-top)" }}
+      >
+        <div className="mx-auto flex max-w-5xl items-center gap-2 px-4 py-2.5 sm:gap-3 sm:py-3">
           <Link
             href="/dashboard"
             className="shrink-0 text-lg font-bold tracking-tight text-primary"
@@ -89,7 +93,7 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
             ))}
           </nav>
 
-          <div className="ml-auto flex items-center gap-1 sm:gap-2">
+          <div className="ml-auto flex items-center gap-0.5 sm:gap-1.5">
             {session?.user && (
               <>
                 <Suspense fallback={<NavbarSkeleton />}>
@@ -100,7 +104,7 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
                 </Suspense>
                 <Link
                   href="/profile"
-                  className="rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  className="hidden min-h-11 min-w-11 items-center justify-center rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:flex"
                   title={session.user.name}
                 >
                   <AvatarDisplay
@@ -109,7 +113,7 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
                     size={36}
                   />
                 </Link>
-                <form action={logoutAction} className="hidden sm:block">
+                <form action={logoutAction} className="hidden md:block">
                   <Button type="submit" variant="ghost" size="sm">
                     Log out
                   </Button>
@@ -118,24 +122,19 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
             )}
           </div>
         </div>
-
-        <nav
-          className="flex gap-1 overflow-x-auto border-t border-border px-4 py-2 md:hidden"
-          aria-label="Mobile"
-        >
-          {nav.map((item) => (
-            <Link
-              key={item.href}
-              href={item.href}
-              className="shrink-0 rounded-lg px-3 py-1.5 text-sm font-medium text-muted hover:bg-surface hover:text-ink"
-            >
-              {item.label}
-            </Link>
-          ))}
-        </nav>
       </header>
 
-      <main className="mx-auto max-w-5xl px-4 py-6 sm:py-8">{children}</main>
+      <main
+        className={
+          session?.user
+            ? "mx-auto max-w-5xl px-4 py-5 pb-[calc(4.75rem+env(safe-area-inset-bottom))] sm:py-8 md:pb-8"
+            : "mx-auto max-w-5xl px-4 py-5 sm:py-8"
+        }
+      >
+        {children}
+      </main>
+
+      {session?.user ? <MobileBottomNav /> : null}
     </div>
   );
 }

@@ -17,7 +17,13 @@ export default function RegisterPage() {
   const [state, action, pending] = useActionState(registerAction, initial);
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-bg px-4 py-10">
+    <div
+      className="flex min-h-dvh items-center justify-center bg-bg px-4 py-10"
+      style={{
+        paddingTop: "max(2.5rem, env(safe-area-inset-top))",
+        paddingBottom: "max(2.5rem, env(safe-area-inset-bottom))",
+      }}
+    >
       <Card className="w-full max-w-md">
         <p className="text-sm font-semibold text-primary">Splitwise</p>
         <h1 className="mt-2 text-2xl font-bold tracking-tight">Create account</h1>

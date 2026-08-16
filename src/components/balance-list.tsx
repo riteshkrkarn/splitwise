@@ -220,6 +220,7 @@ function PairRow({
             type="button"
             variant="secondary"
             size="sm"
+            className="shrink-0"
             onClick={() => setPaying(true)}
           >
             Pay part
