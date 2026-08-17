@@ -117,6 +117,7 @@ export async function createSettlementAction(
   revalidatePath(`/groups/${groupId}`);
   revalidatePath(`/groups/${groupId}/settle`);
   revalidatePath("/dashboard");
+  revalidatePath("/transfers");
   if (stay === "1") return { success: "Payment recorded." };
   redirect(`/groups/${groupId}`);
 }

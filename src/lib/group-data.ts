@@ -1,5 +1,5 @@
 import { cache } from "react";
-import { and, desc, eq, inArray, isNull, or } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
   activityEvents,
@@ -279,5 +279,79 @@ export async function getPendingInvites(groupId: string) {
     )
     .all();
 }
+
+export type TransferRow = {
+  id: string;
+  amount: number;
+  currency: string;
+  date: Date;
+  note: string | null;
+  fromUserId: string;
+  toUserId: string;
+  otherUserId: string;
+  otherName: string;
+  groupId: string | null;
+  groupName: string | null;
+};
+
+export const getTransfersForUser = cache(
+  async (
+    userId: string,
+    opts: {
+      direction: "sent" | "received";
+      groupId?: string;
+      limit?: number;
+      offset?: number;
+    }
+  ) => {
+    const limit = opts.limit ?? 25;
+    const offset = opts.offset ?? 0;
+    const directionFilter =
+      opts.direction === "sent"
+        ? eq(settlements.fromUserId, userId)
+        : eq(settlements.toUserId, userId);
+    const otherJoin =
+      opts.direction === "sent"
+        ? eq(users.id, settlements.toUserId)
+        : eq(users.id, settlements.fromUserId);
+    const where = and(
+      directionFilter,
+      isNull(settlements.deletedAt),
+      opts.groupId ? eq(settlements.groupId, opts.groupId) : undefined
+    );
+
+    const [rows, totalRow] = await Promise.all([
+      db
+        .select({
+          id: settlements.id,
+          amount: settlements.amount,
+          currency: settlements.currency,
+          date: settlements.date,
+          note: settlements.note,
+          fromUserId: settlements.fromUserId,
+          toUserId: settlements.toUserId,
+          otherUserId: users.id,
+          otherName: users.name,
+          groupId: settlements.groupId,
+          groupName: groups.name,
+        })
+        .from(settlements)
+        .innerJoin(users, otherJoin)
+        .leftJoin(groups, eq(groups.id, settlements.groupId))
+        .where(where)
+        .orderBy(desc(settlements.date), desc(settlements.createdAt))
+        .limit(limit)
+        .offset(offset)
+        .all(),
+      db
+        .select({ value: sql<number>`count(*)`.mapWith(Number) })
+        .from(settlements)
+        .where(where)
+        .get(),
+    ]);
+
+    return { rows: rows as TransferRow[], total: totalRow?.value ?? 0 };
+  }
+);
 
 export { selectByIds };

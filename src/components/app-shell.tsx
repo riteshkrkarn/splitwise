@@ -15,6 +15,7 @@ import {
 const nav = [
   { href: "/dashboard", label: "Home" },
   { href: "/friends", label: "Friends" },
+  { href: "/transfers", label: "Transfers" },
   { href: "/activity", label: "Activity" },
   { href: "/analytics", label: "Insights" },
   { href: "/profile", label: "Profile" },

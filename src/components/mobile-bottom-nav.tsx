@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   Activity,
+  ArrowLeftRight,
   BarChart3,
   Home,
   LogOut,
@@ -16,6 +17,7 @@ import { cn } from "@/lib/utils";
 const items = [
   { href: "/dashboard", label: "Home", icon: Home },
   { href: "/friends", label: "Friends", icon: Users },
+  { href: "/transfers", label: "Transfers", icon: ArrowLeftRight },
   { href: "/activity", label: "Activity", icon: Activity },
   { href: "/analytics", label: "Insights", icon: BarChart3 },
   { href: "/profile", label: "Profile", icon: UserRound },
@@ -35,7 +37,7 @@ export function MobileBottomNav() {
       style={{ paddingBottom: "max(0.35rem, env(safe-area-inset-bottom))" }}
       aria-label="Primary"
     >
-      <ul className="mx-auto grid max-w-5xl grid-cols-6 gap-0 px-1 pt-1">
+      <ul className="mx-auto grid max-w-5xl grid-cols-7 gap-0 px-1 pt-1">
         {items.map((item) => {
           const Icon = item.icon;
           const active = isActive(pathname, item.href);

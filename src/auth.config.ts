@@ -5,6 +5,7 @@ const protectedPrefixes = [
   "/groups",
   "/friends",
   "/profile",
+  "/transfers",
   "/activity",
   "/analytics",
 ];

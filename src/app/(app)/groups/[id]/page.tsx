@@ -10,7 +10,7 @@ import { Card, EmptyState, Select } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { PaginationNav } from "@/components/pagination-nav";
 import { db } from "@/db";
-import { expensePayers, expenses, settlements, users } from "@/db/schema";
+import { expensePayers, expenses, users } from "@/db/schema";
 import { CATEGORIES } from "@/lib/utils";
 import {
   assertGroupMember,
@@ -18,7 +18,9 @@ import {
   getGroupMembers,
   getGroupOrThrow,
   getPendingInvites,
+  getTransfersForUser,
 } from "@/lib/group-data";
+import { TransferList } from "@/components/transfer-list";
 import {
   DEFAULT_PAGE_SIZE,
   SMALL_PAGE_SIZE,
@@ -105,10 +107,6 @@ export default async function GroupPage({
     );
   }
 
-  const settlementWhere = and(
-    eq(settlements.groupId, id),
-    isNull(settlements.deletedAt)
-  );
   const deletedWhere = and(
     eq(expenses.groupId, id),
     isNotNull(expenses.deletedAt)
@@ -117,8 +115,8 @@ export default async function GroupPage({
   const [
     active,
     totalRow,
-    settlementRows,
-    settlementTotalRow,
+    sentTransfers,
+    receivedTransfers,
     deleted,
     deletedTotalRow,
   ] = await Promise.all([
@@ -135,19 +133,18 @@ export default async function GroupPage({
       .from(expenses)
       .where(and(...conditions, isNull(expenses.deletedAt)))
       .get(),
-    db
-      .select()
-      .from(settlements)
-      .where(settlementWhere)
-      .orderBy(desc(settlements.date))
-      .limit(SMALL_PAGE_SIZE)
-      .offset(settlementsOffset)
-      .all(),
-    db
-      .select({ value: sql<number>`count(*)`.mapWith(Number) })
-      .from(settlements)
-      .where(settlementWhere)
-      .get(),
+    getTransfersForUser(session.user.id, {
+      direction: "sent",
+      groupId: id,
+      limit: SMALL_PAGE_SIZE,
+      offset: settlementsOffset,
+    }),
+    getTransfersForUser(session.user.id, {
+      direction: "received",
+      groupId: id,
+      limit: SMALL_PAGE_SIZE,
+      offset: 0,
+    }),
     db
       .select()
       .from(expenses)
@@ -164,7 +161,7 @@ export default async function GroupPage({
   ]);
 
   const total = totalRow?.value ?? 0;
-  const settlementTotal = settlementTotalRow?.value ?? 0;
+  const settlementTotal = sentTransfers.total;
   const deletedTotal = deletedTotalRow?.value ?? 0;
 
   const payerRows =
@@ -430,32 +427,17 @@ export default async function GroupPage({
       </Card>
 
       <Card>
-        <h2 className="mb-3 text-sm font-semibold text-muted">Settlements</h2>
-        <ul className="space-y-2 text-sm">
-          {settlementRows.length === 0 && (
-            <li className="text-muted">No transfers recorded yet.</li>
-          )}
-          {settlementRows.map((s) => (
-            <li key={s.id} className="flex flex-wrap justify-between gap-2">
-              <span>
-                <span className="font-medium">
-                  {nameById[s.fromUserId] ?? "Someone"}
-                </span>
-                {" transferred "}
-                <span className="money">
-                  {formatMoney(s.amount, s.currency)}
-                </span>
-                {" to "}
-                <span className="font-medium">
-                  {nameById[s.toUserId] ?? "someone"}
-                </span>
-                {s.note ? (
-                  <span className="text-muted"> — {s.note}</span>
-                ) : null}
-              </span>
-            </li>
-          ))}
-        </ul>
+        <div className="mb-3 flex flex-wrap items-end justify-between gap-2">
+          <h2 className="text-sm font-semibold text-muted">Your transfers</h2>
+          <Link href="/transfers" className="text-xs font-medium text-accent">
+            All transfers
+          </Link>
+        </div>
+        <TransferList
+          transfers={sentTransfers.rows}
+          empty="No payments from you in this group yet."
+          direction="sent"
+        />
         <PaginationNav
           prevHref={
             settlementsPage > 1 ? settlementsHref(settlementsPage - 1) : null
@@ -466,6 +448,18 @@ export default async function GroupPage({
               : null
           }
         />
+        {receivedTransfers.total > 0 && (
+          <div className="mt-5">
+            <h3 className="mb-2 text-sm font-semibold text-muted">
+              Paid to you
+            </h3>
+            <TransferList
+              transfers={receivedTransfers.rows}
+              empty=""
+              direction="received"
+            />
+          </div>
+        )}
       </Card>
 
       {deletedTotal > 0 && (

@@ -13,6 +13,8 @@ export const config = {
     "/friends/:path*",
     "/profile",
     "/profile/:path*",
+    "/transfers",
+    "/transfers/:path*",
     "/activity",
     "/activity/:path*",
     "/analytics",
